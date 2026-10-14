@@ -1,0 +1,1 @@
+# medikiosk_projecy
