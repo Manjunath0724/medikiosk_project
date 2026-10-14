@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <!-- Circular Emblem Background -->
+  <circle cx="32" cy="32" r="30" fill="#064e3b" stroke="#10b981" stroke-width="2"/>
+  
+  <!-- Ayush Sacred Leaf -->
+  <path d="M32 10 C20 18 16 30 20 44 C24 50 32 54 32 54 C32 54 40 50 44 44 C48 30 44 18 32 10 Z" fill="#10b981" opacity="0.9"/>
+  <path d="M32 14 L32 52" stroke="#ecfdf5" stroke-width="2" stroke-linecap="round"/>
+  <path d="M32 24 C28 22 25 24 23 27" stroke="#ecfdf5" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M32 32 C27 30 24 33 22 37" stroke="#ecfdf5" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M32 24 C36 22 39 24 41 27" stroke="#ecfdf5" stroke-width="1.5" stroke-linecap="round"/>
+  <path d="M32 32 C37 30 40 33 42 37" stroke="#ecfdf5" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Medical Cross Accent -->
+  <rect x="29" y="4" width="6" height="6" rx="1.5" fill="#f59e0b"/>
+</svg>
