@@ -10,12 +10,16 @@ spec, unmodified, in prompts.py.
 """
 
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, Form, HTTPException, UploadFile, File
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 
 from llm import call_json, call_json_vision
 from models import (
@@ -64,6 +68,10 @@ from session_store import (
 
 
 app = FastAPI(title="MediKiosk API", version="0.1.0")
+logger = logging.getLogger("medikiosk.main")
+PRIVATE_RECORDS_DIR = Path(__file__).resolve().parent / "private_records"
+MAX_RECORD_UPLOAD_BYTES = 20 * 1024 * 1024
+ALLOWED_RECORD_TYPES = {"application/pdf", "image/jpeg", "image/png", "image/webp"}
 
 @app.on_event("startup")
 def on_startup():
@@ -96,6 +104,23 @@ def _now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def _normalize_medical_record(record: dict) -> dict:
+    return {
+        **record,
+        "type": record.get("type") or record.get("modality") or record.get("scan_type") or "Medical Record",
+        "summary": record.get("summary") or record.get("findings") or "No written findings supplied.",
+    }
+
+
+def _normalize_past_diagnosis(diagnosis: dict) -> dict:
+    return {
+        **diagnosis,
+        "specialization": diagnosis.get("specialization") or diagnosis.get("specialty") or "Consulting physician",
+        "remarks": diagnosis.get("remarks") or diagnosis.get("doctor_remarks") or "No consulting remarks recorded.",
+        "intake_summary": diagnosis.get("intake_summary") or diagnosis.get("diagnosis") or "No prior intake summary recorded.",
+    }
+
+
 # ---------------------------------------------------------------------------
 # Authentication Endpoints (JSON Prototype Storage)
 # ---------------------------------------------------------------------------
@@ -118,7 +143,7 @@ def auth_signup(req: SignupRequest):
             abha_id=req.abha_id,
             age=req.age,
             gender=req.gender,
-            department=req.department or "ayush",
+            department=req.department or "general",
             specialization=req.specialization,
         )
         token = f"tok_{uuid.uuid4().hex}"
@@ -269,13 +294,16 @@ def get_doctors(q: Optional[str] = None, specialty: Optional[str] = None):
     registered_doctors = [u for u in all_users if u.get("role") == "doctor"]
 
     # Combine registered doctors with default catalog to ensure rich specialty coverage
-    seen_ids = set()
+    seen_keys = set()
     doctors = []
 
     for d in registered_doctors + DEFAULT_DOCTORS_LIST:
-        doc_id = d.get("id") or d.get("username")
-        if doc_id and doc_id not in seen_ids:
-            seen_ids.add(doc_id)
+        username_key = (d.get("username") or "").strip().lower()
+        name_key = (d.get("full_name") or d.get("name") or "").strip().lower()
+        unique_key = username_key or name_key
+        if unique_key and unique_key not in seen_keys:
+            seen_keys.add(unique_key)
+            doc_id = d.get("id") or d.get("username")
             doctors.append({
                 "id": doc_id,
                 "full_name": d.get("full_name") or d.get("name") or "Doctor",
@@ -316,8 +344,8 @@ def get_doctors(q: Optional[str] = None, specialty: Optional[str] = None):
 def get_patient_vault():
     """Return pre-uploaded diagnostic records vault (MRI, X-ray, Blood Sugar/BP logs, CT scans) and past diagnoses."""
     return {
-        "vault_records": DEFAULT_PATIENT_VAULT,
-        "past_diagnoses": DEFAULT_PAST_DIAGNOSES,
+        "vault_records": [_normalize_medical_record(record) for record in DEFAULT_PATIENT_VAULT],
+        "past_diagnoses": [_normalize_past_diagnosis(item) for item in DEFAULT_PAST_DIAGNOSES],
         "ayurveda_parameters": AYURVEDA_PARAMETER_DEFINITIONS,
     }
 
@@ -354,18 +382,137 @@ def session_start(req: SessionStartRequest):
 def attach_records(session_id: str, req: AttachRecordsRequest):
     """Attach prior medical records (diagnostic scans, labs, and past diagnoses) before consulting doctor submission."""
     session = _require_session(session_id)
-    session["attached_records"] = req.attached_records or []
+    uploaded_records = {
+        document["id"]: document["patient_record"]
+        for document in session.get("documents", [])
+        if document.get("patient_record")
+    }
+    vault_records = {
+        record["id"]: _normalize_medical_record(record)
+        for record in DEFAULT_PATIENT_VAULT
+    }
+    selected_records = []
+    for submitted_record in req.attached_records or []:
+        record_id = submitted_record.get("id") if isinstance(submitted_record, dict) else None
+        record = vault_records.get(record_id) or uploaded_records.get(record_id)
+        if record and record_id not in {item.get("id") for item in selected_records}:
+            selected_records.append(record)
+
+    session["attached_records"] = selected_records
     session["share_past_history"] = bool(req.share_past_history)
-    if req.share_past_history and not session.get("past_diagnoses"):
-        session["past_diagnoses"] = DEFAULT_PAST_DIAGNOSES
+    session["past_diagnoses"] = (
+        [
+            _normalize_past_diagnosis(item)
+            for item in session.get("past_diagnoses") or DEFAULT_PAST_DIAGNOSES
+        ]
+        if req.share_past_history
+        else []
+    )
     save_session(session)
     return {
         "success": True,
         "session_id": session_id,
         "attached_count": len(session["attached_records"]),
-        "attached_records": session["attached_records"],
         "share_past_history": session["share_past_history"],
     }
+
+
+@app.post("/api/sessions/{session_id}/records/upload")
+async def upload_patient_record(
+    session_id: str,
+    title: str = Form(...),
+    record_type: str = Form(...),
+    facility: str = Form(""),
+    summary: str = Form(""),
+    file: UploadFile = File(...),
+):
+    """Store a patient-uploaded scan privately and associate its metadata with the intake."""
+    session = _require_session(session_id)
+    media_type = file.content_type or ""
+    if media_type not in ALLOWED_RECORD_TYPES:
+        raise HTTPException(
+            status_code=415,
+            detail="Upload a PDF, JPEG, PNG, or WebP medical report.",
+        )
+
+    file_bytes = await file.read(MAX_RECORD_UPLOAD_BYTES + 1)
+    await file.close()
+    if not file_bytes:
+        raise HTTPException(status_code=400, detail="The selected report is empty.")
+    if len(file_bytes) > MAX_RECORD_UPLOAD_BYTES:
+        raise HTTPException(status_code=413, detail="Medical reports must be 20 MB or smaller.")
+    if not title.strip():
+        raise HTTPException(status_code=400, detail="A report title is required.")
+
+    file_id = uuid.uuid4().hex
+    try:
+        PRIVATE_RECORDS_DIR.mkdir(parents=True, exist_ok=True)
+        (PRIVATE_RECORDS_DIR / file_id).write_bytes(file_bytes)
+    except OSError as error:
+        logger.exception("Failed to store uploaded patient record")
+        raise HTTPException(status_code=500, detail="The report could not be stored securely.") from error
+
+    record = {
+        "id": str(uuid.uuid4()),
+        "title": title.strip(),
+        "type": record_type.strip() or "Medical Report",
+        "date": datetime.now(timezone.utc).date().isoformat(),
+        "facility": facility.strip() or "Patient upload",
+        "summary": summary.strip() or "Uploaded by patient for this consultation.",
+        "file_name": Path(file.filename or "medical-report").name,
+        "file_id": file_id,
+        "media_type": media_type,
+    }
+    session.setdefault("documents", []).append(
+        {
+            "id": record["id"],
+            "filename": record["file_name"],
+            "uploaded_at": _now_iso(),
+            "patient_record": record,
+        }
+    )
+    save_session(session)
+    return {"record": record}
+
+
+@app.get("/api/sessions/{session_id}/records/{record_id}/file")
+def get_patient_record_file(session_id: str, record_id: str):
+    """Serve an attached report inline only while the patient has granted live access."""
+    session = _require_session(session_id)
+    if not session.get("demonstration_active", True):
+        raise HTTPException(status_code=403, detail="Patient has revoked access to medical records.")
+
+    is_attached = any(
+        record.get("id") == record_id for record in session.get("attached_records", [])
+    )
+    if not is_attached:
+        raise HTTPException(status_code=404, detail="The report is not attached to this consultation.")
+
+    document = next(
+        (
+            item
+            for item in session.get("documents", [])
+            if item.get("id") == record_id and item.get("patient_record")
+        ),
+        None,
+    )
+    if not document:
+        raise HTTPException(status_code=404, detail="Uploaded report file not found.")
+
+    record = document["patient_record"]
+    file_path = PRIVATE_RECORDS_DIR / record["file_id"]
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="Uploaded report file is unavailable.")
+
+    return FileResponse(
+        file_path,
+        media_type=record["media_type"],
+        headers={
+            "Content-Disposition": "inline",
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -402,6 +549,14 @@ def toggle_demonstration(session_id: str, req: Optional[ToggleDemonstrationReque
 def call_patient(session_id: str, req: Optional[CallPatientRequest] = None):
     """Doctor accepts and calls patient into their consultation room/cabin."""
     session = _require_session(session_id)
+    assigned_doctor = session.get("consulting_doctor") or {}
+    assigned_doctor_id = assigned_doctor.get("id")
+    if assigned_doctor_id and (not req or req.doctor_id != assigned_doctor_id):
+        raise HTTPException(
+            status_code=409,
+            detail="This consultation request is assigned to a different doctor.",
+        )
+
     session["status"] = "called"
     session["called_at"] = _now_iso()
     if req and (req.doctor_name or req.cabin):
@@ -439,6 +594,23 @@ def update_status(session_id: str, req: UpdateStatusRequest):
     return {"session_id": session_id, "status": session["status"]}
 
 
+@app.get("/api/sessions/{session_id}/status")
+def get_session_status(session_id: str):
+    """Fast polling endpoint for patient waiting screen status and live demonstration consent."""
+    session = _require_session(session_id)
+    doc = session.get("consulting_doctor") or {}
+    return {
+        "session_id": session_id,
+        "status": session.get("status", "waiting"),
+        "demonstration_active": session.get("demonstration_active", True),
+        "called_at": session.get("called_at"),
+        "consulting_doctor": doc,
+        "token_number": session.get("token_number"),
+        "token": session.get("token_number"),
+        "cabin": doc.get("cabin", "Cabin 101"),
+    }
+
+
 
 CLINICAL_PROGRESSION = {
     "en": [
@@ -459,16 +631,16 @@ CLINICAL_PROGRESSION = {
             ["Worse after meals", "Worse on empty stomach", "Worse with movement / exertion", "Relieved with rest / warm fluids"]
         ),
         (
-            "Regarding your digestion (Agni): do you experience bloating, burning acidity, heavy feeling, or poor appetite?",
-            ["Good appetite & digestion", "Bloating & gas after food", "Sour belching / burning acidity", "Poor appetite (Manda Agni)"]
+            "Do you have associated symptoms such as changes in appetite, nausea, bloating, heartburn, or fatigue?",
+            ["No associated symptoms", "Reduced appetite or nausea", "Bloating or heartburn", "Fatigue or another symptom"]
         ),
         (
-            "How are your bowel habits (Koshtha)? Are they regular once daily, or do you experience constipation or looseness?",
-            ["Regular once daily (Madhyama)", "Hard / constipated (Krura)", "Loose / frequent stools (Mridu)", "Irregular / variable"]
+            "Have you noticed any change in your bowel habits, such as constipation, diarrhea, or a change in frequency?",
+            ["No recent change", "Constipation", "Diarrhea or loose stools", "Another change in frequency"]
         ),
         (
-            "How is your sleep quality (Nidra), daily stress level, and water/diet intake (Ahara-Vihara)?",
-            ["Sound 7-8 hours sleep", "Disturbed / difficulty sleeping", "High stress / irregular meals", "Balanced home-cooked diet"]
+            "How have your diet, hydration, physical activity, sleep, or stress levels been recently?",
+            ["No notable changes", "Changes in diet or hydration", "Less activity or disrupted sleep", "Increased stress"]
         ),
         (
             "Do you have any past medical conditions (like diabetes, BP, asthma) or allergies to any medications?",
@@ -497,16 +669,16 @@ CLINICAL_PROGRESSION = {
             ["खाना खाने के बाद बढ़ती है", "खाली पेट ज़्यादा होती है", "चलने-फिरने से बढ़ती है", "आराम करने से राहत मिलती है"]
         ),
         (
-            "आपकी भूख और पाचन क्रिया (अग्नि) कैसी है? क्या पेट फूलना, खट्टी डकार या भारीपन रहता है?",
-            ["भूख और पाचन बिल्कुल सामान्य है", "खाने के बाद पेट फूलता / गैस बनती है", "खट्टी डकारें व सीने में जलन", "भूख बहुत कम लगती है (मंदाग्नि)"]
+            "क्या भूख में बदलाव, मतली, पेट फूलना, सीने में जलन या थकान जैसे अन्य लक्षण हैं?",
+            ["कोई अन्य लक्षण नहीं", "भूख कम लगना या मतली", "पेट फूलना या सीने में जलन", "थकान या कोई अन्य लक्षण"]
         ),
         (
-            "आपका पेट साफ होने की आदत (कोष्ठ) कैसी है? क्या कब्ज़ या दस्त की समस्या रहती है?",
-            ["प्रतिदिन नियमित साफ होता है (मध्यम)", "कड़ा मल / कब्ज़ रहता है (क्रूर कोष्ठ)", "पतला / बार-बार जाना पड़ता है (मृदु)", "अनियमित रहता है"]
+            "क्या मल त्याग की आदत में कोई बदलाव आया है, जैसे कब्ज़, दस्त या बार-बार जाने की समस्या?",
+            ["हाल में कोई बदलाव नहीं", "कब्ज़", "दस्त या पतला मल", "बारंबारता में अन्य बदलाव"]
         ),
         (
-            "आपकी नींद (निद्रा) कैसी है, और खान-पान व दैनिक तनाव का स्तर कैसा रहता है?",
-            ["अच्छी 7-8 घंटे की गहरी नींद", "नींद बार-बार टूटती है / तनाव है", "अनियमित भोजन व भागदौड़", "सादा सुपाच्य भोजन लेता हूँ"]
+            "हाल में आपके खान-पान, पानी पीने, शारीरिक गतिविधि, नींद या तनाव में क्या बदलाव हुए हैं?",
+            ["कोई खास बदलाव नहीं", "खान-पान या पानी पीने में बदलाव", "कम गतिविधि या नींद में परेशानी", "तनाव में वृद्धि"]
         ),
         (
             "क्या आपको पहले से कोई बीमारी (जैसे बीपी, शुगर, थायरॉइड) है या किसी दवा से एलर्जी है?",
@@ -539,7 +711,7 @@ def converse(req: ConverseRequest):
             session["transcript"]["chief_complaint"] = req.patient_message
     else:
         language_name = "Hindi" if session["language"] == "hi" else "English"
-        dept = session.get("department", "ayush")
+        dept = session.get("department", "general")
         session["messages"].append(
             {
                 "role": "user",
@@ -552,8 +724,8 @@ def converse(req: ConverseRequest):
             }
         )
 
-    # Progressive fallback determination
-    if current_turn >= 8:
+    # The initial prompt request is counted as turn one; the final answer arrives on turn nine.
+    if current_turn >= len(progression):
         fallback = {
             "next_question": None,
             "quick_options": [],
@@ -576,14 +748,16 @@ def converse(req: ConverseRequest):
 
     result = call_json(MODULE_A_SYSTEM_PROMPT, session["messages"], fallback)
 
-    # Enforce progressive turn advance and 8-10 turn cap
-    if current_turn >= 8:
+    # Keep the intake at exactly nine clinical stages unless an emergency is flagged.
+    if current_turn >= len(progression):
         result["interview_complete"] = True
         result["next_question"] = None
         result["quick_options"] = []
-    elif not result.get("interview_complete") and not result.get("next_question"):
-        q_idx = min(current_turn, len(progression) - 1)
-        result["next_question"], result["quick_options"] = progression[q_idx]
+    elif not result.get("red_flag"):
+        result["interview_complete"] = False
+        if not result.get("next_question"):
+            q_idx = min(current_turn, len(progression) - 1)
+            result["next_question"], result["quick_options"] = progression[q_idx]
 
     # Save turn and persist assistant message
     assistant_record = {k: v for k, v in result.items() if k != "_fallback_reason"}
@@ -728,7 +902,7 @@ def summarize(req: SummarizeRequest):
         for doc in session["documents"]
     ]
     payload = {
-        "department": session.get("department", "ayush"),
+        "department": session.get("department", "general"),
         "transcript": session["transcript"],
         "extracted_documents": documents_for_prompt,
     }
@@ -1000,7 +1174,7 @@ def generate_narrative_summary(session_id: str, refresh: bool = False):
 
     context_payload = {
         "patient_name": session.get("patient_name", "Patient"),
-        "department": session.get("department", "ayush"),
+        "department": session.get("department", "general"),
         "chief_complaint": (session.get("transcript") or {}).get("chief_complaint") or (session.get("summary") or {}).get("chief_complaint") or "Not reported",
         "transcript": session.get("transcript") or {},
         "summary": session.get("summary") or {},
@@ -1110,7 +1284,7 @@ def route(req: RouteRequest):
                     "text": "Outpatient Clinical & AYUSH Intake Case Summary",
                 },
                 "date": _now_iso(),
-                "title": f"OPD Case Record - {session.get('department', 'ayush').upper()}",
+                "title": f"OPD Case Record - {session.get('department', 'general').upper()}",
                 "section": composition_sections,
                 "meta": {"profile": ["https://nrces.in/ndhm/fhir/r4/StructureDefinition/ClinicalArtifact"]},
             },
@@ -1166,6 +1340,27 @@ def get_session_full(session_id: str):
     # Omit the raw LLM turn history -- it's internal plumbing for Module
     # A's statelessness, not something the dashboard needs to render.
     public_view = {k: v for k, v in session.items() if k != "messages"}
+    if not session.get("demonstration_active", True):
+        public_view["attached_records"] = []
+        public_view["past_diagnoses"] = []
+        public_view["documents"] = []
+    else:
+        public_view["attached_records"] = [
+            _normalize_medical_record(record)
+            for record in session.get("attached_records", [])
+        ]
+        public_view["documents"] = [
+            document
+            for document in session.get("documents", [])
+            if not document.get("patient_record")
+        ]
+        if session.get("share_past_history", True):
+            public_view["past_diagnoses"] = [
+                _normalize_past_diagnosis(item)
+                for item in session.get("past_diagnoses", [])
+            ]
+        else:
+            public_view["past_diagnoses"] = []
     return public_view
 
 

@@ -20,13 +20,42 @@ import FloatingContact from "./components/FloatingContact.jsx";
 import ConfirmationModal from "./components/ConfirmationModal.jsx";
 import { initUtmTracking } from "./utils/utm.js";
 
+function getClientProfile(user) {
+  if (
+    !user ||
+    typeof user !== "object" ||
+    typeof user.id !== "string" ||
+    !["doctor", "patient"].includes(user.role)
+  ) {
+    return null;
+  }
+  return {
+    id: user.id,
+    username: typeof user.username === "string" ? user.username : "",
+    role: user.role,
+    full_name: typeof user.full_name === "string" ? user.full_name : "",
+    department: typeof user.department === "string" ? user.department : "",
+    specialization: typeof user.specialization === "string" ? user.specialization : "",
+    hospital: typeof user.hospital === "string" ? user.hospital : "",
+    cabin: typeof user.cabin === "string" ? user.cabin : "",
+    abha_id: typeof user.abha_id === "string" ? user.abha_id : "",
+  };
+}
+
 function PatientKiosk() {
   const navigate = useNavigate();
   const [lang, setLang] = useState("en");
   const [currentUser, setCurrentUser] = useState(() => {
     try {
       const saved = localStorage.getItem("medikiosk_user");
-      return saved ? JSON.parse(saved) : null;
+      if (!saved) return null;
+      const profile = getClientProfile(JSON.parse(saved));
+      if (profile) {
+        localStorage.setItem("medikiosk_user", JSON.stringify(profile));
+      } else {
+        localStorage.removeItem("medikiosk_user");
+      }
+      return profile;
     } catch {
       return null;
     }
@@ -34,7 +63,7 @@ function PatientKiosk() {
   const [isGuest, setIsGuest] = useState(false);
   const [sessionId, setSessionId] = useState(null);
   const [token, setToken] = useState("");
-  const [department, setDepartment] = useState("ayush");
+  const [department, setDepartment] = useState("general");
   const [consultingDoctor, setConsultingDoctor] = useState(null);
   const [step, setStep] = useState("identify"); // identify -> converse -> scan -> summary -> sent
 
@@ -62,7 +91,7 @@ function PatientKiosk() {
     if (!currentUser && !isGuest) {
       document.title = titles.auth;
     } else {
-      document.title = titles[step] || "MediKiosk | Ayush Case-Taking Kiosk";
+      document.title = titles[step] || "MediKiosk | Multispecialty OPD";
     }
   }, [step, currentUser, isGuest]);
 
@@ -91,7 +120,7 @@ function PatientKiosk() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-slate-100 overflow-x-hidden transition-colors">
+    <div className="kiosk-shell min-h-screen flex flex-col bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] overflow-x-hidden transition-colors">
       {/* Skip to Content Link (Item 12: Accessibility) */}
       <a
         href="#main-content"
@@ -340,12 +369,14 @@ function PatientKiosk() {
           <AuthScreen
             lang={lang}
             onAuthSuccess={(user) => {
-              setCurrentUser(user);
-              localStorage.setItem("medikiosk_user", JSON.stringify(user));
-              if (user.role === "doctor") {
+              const profile = getClientProfile(user);
+              if (!profile) return;
+              setCurrentUser(profile);
+              localStorage.setItem("medikiosk_user", JSON.stringify(profile));
+              if (profile?.role === "doctor") {
                 navigate("/doctor");
               } else {
-                if (user.department) setDepartment(user.department);
+                if (profile?.department) setDepartment(profile.department);
                 setStep("identify");
               }
             }}
@@ -414,11 +445,11 @@ function PatientKiosk() {
         )}
       </main>
 
-      {/* Hospital Help & Compliance Footer (Item 18: Last updated date) */}
+      {/* Hospital Help & Prototype Notice */}
       <footer className="bg-white dark:bg-slate-900 border-t border-slate-200 dark:border-slate-800 py-3.5 px-4 text-center text-xs text-slate-500 dark:text-slate-400 print:hidden space-y-1.5 transition-colors">
         <div className="flex flex-wrap items-center justify-center gap-3">
           <p className="font-semibold text-slate-700 dark:text-slate-300">
-            MediKiosk OPD Case-Taking Platform • ABDM & DPDP Act 2023 Compliant
+            MediKiosk OPD Intake Prototype • FHIR R4 demo output
           </p>
           <span className="text-slate-300 dark:text-slate-700 hidden sm:inline">•</span>
           <button
@@ -447,9 +478,8 @@ function PatientKiosk() {
           </a>
         </p>
 
-        {/* Last updated date badge (Item 18) */}
         <p className="text-[10px] text-slate-500 dark:text-slate-400 pt-0.5">
-          Clinical protocols last verified: {new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" })} • MediKiosk v4.5.2 (Impeccable Certified)
+          Not certified for clinical use or regulatory compliance. Do not enter real patient data.
         </p>
       </footer>
 
@@ -521,7 +551,7 @@ export default function App() {
 
   useEffect(() => {
     if (location.pathname.startsWith("/doctor")) {
-      document.title = "MediKiosk | Ayush & Hospital Doctor OPD Workstation";
+      document.title = "MediKiosk | Multispecialty Doctor OPD Workstation";
     }
   }, [location]);
 

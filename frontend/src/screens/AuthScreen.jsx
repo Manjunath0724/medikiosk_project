@@ -68,6 +68,14 @@ function IconEmblem({ className = "w-6 h-6" }) {
   );
 }
 
+function isValidAuthUser(user) {
+  return (
+    user &&
+    typeof user.id === "string" &&
+    (user.role === "patient" || user.role === "doctor")
+  );
+}
+
 export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
   const [mode, setMode] = useState("login"); // "login" | "signup"
   const [role, setRole] = useState("patient"); // "patient" | "doctor"
@@ -99,7 +107,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
 
   const handleLoginSubmit = async (e) => {
     e.preventDefault();
-    if (!loginIdentifier.trim() || !loginPassword.trim()) {
+    if (!loginIdentifier.trim() || !loginPassword) {
       setError(
         lang === "hi"
           ? "कृपया उपयोगकर्ता नाम और पासवर्ड दर्ज करें।"
@@ -113,9 +121,9 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
     try {
       const res = await api.login({
         username: loginIdentifier.trim(),
-        password: loginPassword.trim(),
+        password: loginPassword,
       });
-      if (res.success && res.user) {
+      if (res.success && isValidAuthUser(res.user)) {
         setSuccessMsg(
           lang === "hi"
             ? "प्रमाणीकरण सफल! आपका स्वागत है।"
@@ -125,7 +133,13 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
           onAuthSuccess(res.user, res.token);
         }, 500);
       } else {
-        setError(res.message || "Authentication failed.");
+        setError(
+          res.success
+            ? lang === "hi"
+              ? "सर्वर से अमान्य खाता विवरण मिला। कृपया पुनः प्रयास करें।"
+              : "The server returned an invalid account profile. Please try again."
+            : res.message || "Authentication failed."
+        );
       }
     } catch (err) {
       setError(
@@ -145,11 +159,19 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
 
   const handleSignupSubmit = async (e) => {
     e.preventDefault();
-    if (!fullName.trim() || !signupUsername.trim() || !signupPassword.trim()) {
+    if (!fullName.trim() || !signupUsername.trim() || !signupPassword) {
       setError(
         lang === "hi"
           ? "कृपया नाम, उपयोगकर्ता नाम और पासवर्ड दर्ज करें।"
           : "Please fill in full name, username, and password."
+      );
+      return;
+    }
+    if (signupPassword.length < 4 || signupPassword.length > 128) {
+      setError(
+        lang === "hi"
+          ? "पासवर्ड 4 से 128 अक्षरों का होना चाहिए।"
+          : "Password must be between 4 and 128 characters."
       );
       return;
     }
@@ -160,7 +182,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
       const payload = {
         full_name: fullName.trim(),
         username: signupUsername.trim(),
-        password: signupPassword.trim(),
+        password: signupPassword,
         role,
         email: signupEmail.trim() || null,
         phone: signupPhone.trim() || null,
@@ -174,7 +196,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
       };
 
       const res = await api.signup(payload);
-      if (res.success && res.user) {
+      if (res.success && isValidAuthUser(res.user)) {
         setSuccessMsg(
           lang === "hi"
             ? "खाता सफलतापूर्वक बनाया गया! लॉगिन किया जा रहा है..."
@@ -183,6 +205,12 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
         setTimeout(() => {
           onAuthSuccess(res.user, res.token);
         }, 700);
+      } else {
+        setError(
+          lang === "hi"
+            ? "सर्वर से अमान्य खाता विवरण मिला। कृपया पुनः प्रयास करें।"
+            : "The server returned an invalid account profile. Please try again."
+        );
       }
     } catch (err) {
       setError(
@@ -199,7 +227,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
   return (
     <main
       id="main-content"
-      className="flex-1 w-full bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] transition-colors"
+      className="kiosk-screen flex-1 w-full bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] transition-colors"
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-16">
         {/* Asymmetric 2-Column Human-Crafted Layout */}
@@ -274,7 +302,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
               <p className="leading-normal">
                 {lang === "hi"
                   ? "यह प्रणाली राष्ट्रीय स्वास्थ्य प्राधिकरण (NHA) के ABDM FHIR R4 विनिर्देशों एवं आयुष मानकीकृत नैदानिक शब्दावली के अनुरूप कार्य करती है।"
-                  : "Compliant with ABDM NRCES FHIR R4 data specifications and standardized Ayush clinical terminology."}
+                  : "FHIR R4 sample output and standardized Ayush terminology are shown for demonstration; this prototype is not certified for clinical or regulatory use."}
               </p>
             </div>
 
@@ -363,7 +391,10 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                         type="text"
                         value={loginIdentifier}
                         onChange={(e) => setLoginIdentifier(e.target.value)}
+                        aria-label={lang === "hi" ? "उपयोगकर्ता नाम या ईमेल" : "Username or email"}
                         placeholder="e.g. physician_sharma"
+                        autoComplete="username"
+                        maxLength={254}
                         className="w-full px-3 py-2.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-sm text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E] focus:ring-1 focus:ring-[#0D5C4E] transition-colors"
                         required
                       />
@@ -380,7 +411,10 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                           type={showLoginPassword ? "text" : "password"}
                           value={loginPassword}
                           onChange={(e) => setLoginPassword(e.target.value)}
+                          aria-label={lang === "hi" ? "पासवर्ड" : "Password"}
                           placeholder="••••••••"
+                          autoComplete="current-password"
+                          maxLength={128}
                           className="w-full pl-3 pr-10 py-2.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-sm text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E] focus:ring-1 focus:ring-[#0D5C4E] transition-colors"
                           required
                         />
@@ -433,61 +467,61 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                         <button
                           type="button"
                           onClick={() => {
-                            setLoginIdentifier("patient_demo");
+                            setLoginIdentifier("patient");
                             setLoginPassword("patient123");
                           }}
                           className="text-left px-2.5 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#0D5C4E] text-[11px] transition-colors"
                         >
-                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Patient Demo</div>
-                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">patient_demo</div>
+                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Patient (Ramesh Kumar)</div>
+                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">username: patient</div>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            setLoginIdentifier("doc_ortho");
+                            setLoginIdentifier("dr_kulkarni");
                             setLoginPassword("doctor123");
                           }}
                           className="text-left px-2.5 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#0D5C4E] text-[11px] transition-colors"
                         >
-                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Ortho (Verma)</div>
-                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">Orthopedics · Rm 204</div>
+                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Rajesh Kulkarni</div>
+                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">Orthopedics · Cabin 108</div>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            setLoginIdentifier("doc_cardio");
+                            setLoginIdentifier("dr_mehta");
                             setLoginPassword("doctor123");
                           }}
                           className="text-left px-2.5 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#0D5C4E] text-[11px] transition-colors"
                         >
-                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Cardio (Rao)</div>
-                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">Cardiology · Rm 310</div>
+                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Arvind Mehta</div>
+                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">Cardiology · Room 204</div>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            setLoginIdentifier("doc_genmed");
+                            setLoginIdentifier("dr_sen");
                             setLoginPassword("doctor123");
                           }}
                           className="text-left px-2.5 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#0D5C4E] text-[11px] transition-colors"
                         >
-                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Gen Med (Sen)</div>
-                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">Internal Med · Rm 105</div>
+                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Ananya Sen</div>
+                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">General Med · Room 102</div>
                         </button>
 
                         <button
                           type="button"
                           onClick={() => {
-                            setLoginIdentifier("physician_sharma");
+                            setLoginIdentifier("doctor");
                             setLoginPassword("doctor123");
                           }}
                           className="text-left col-span-2 px-2.5 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#0D5C4E] text-[11px] transition-colors"
                         >
-                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Ayush (Sharma)</div>
-                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">Ayush Holistic & Kayachikitsa · Cabin 101</div>
+                          <div className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">Dr. Sunita Sharma</div>
+                          <div className="text-[10px] text-[#4A5852] dark:text-[#8D9E97]">Ayush Panchakarma & Integrative · Cabin 101</div>
                         </button>
                       </div>
                     </div>
@@ -506,6 +540,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                         <button
                           type="button"
                           onClick={() => setRole("patient")}
+                          aria-pressed={role === "patient"}
                           className={`py-2 px-3 rounded border text-xs font-bold transition-colors flex items-center justify-center gap-2 ${
                             role === "patient"
                               ? "border-[#0D5C4E] bg-[#EAF3F0] dark:bg-[#12241F] text-[#0D5C4E] dark:text-[#15806C]"
@@ -519,6 +554,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                         <button
                           type="button"
                           onClick={() => setRole("doctor")}
+                          aria-pressed={role === "doctor"}
                           className={`py-2 px-3 rounded border text-xs font-bold transition-colors flex items-center justify-center gap-2 ${
                             role === "doctor"
                               ? "border-[#0D5C4E] bg-[#EAF3F0] dark:bg-[#12241F] text-[#0D5C4E] dark:text-[#15806C]"
@@ -540,7 +576,10 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                         type="text"
                         value={fullName}
                         onChange={(e) => setFullName(e.target.value)}
-                        placeholder="e.g. Vaidya Suresh Sharma"
+                        aria-label={lang === "hi" ? "पूरा नाम" : "Full legal name"}
+                        placeholder="e.g. Dr. Suresh Sharma"
+                        autoComplete="name"
+                        maxLength={120}
                         className="w-full px-3 py-2 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-xs text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E]"
                         required
                       />
@@ -556,7 +595,10 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                           type="text"
                           value={signupUsername}
                           onChange={(e) => setSignupUsername(e.target.value)}
+                          aria-label={lang === "hi" ? "उपयोगकर्ता नाम" : "Username"}
                           placeholder="e.g. suresh_opd"
+                          autoComplete="username"
+                          maxLength={64}
                           className="w-full px-3 py-2 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-xs text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E]"
                           required
                         />
@@ -569,7 +611,10 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                           type="email"
                           value={signupEmail}
                           onChange={(e) => setSignupEmail(e.target.value)}
+                          aria-label={lang === "hi" ? "ईमेल" : "Official email"}
                           placeholder="user@hospital.gov.in"
+                          autoComplete="email"
+                          maxLength={254}
                           className="w-full px-3 py-2 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-xs text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E]"
                         />
                       </div>
@@ -585,7 +630,10 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                           type="tel"
                           value={signupPhone}
                           onChange={(e) => setSignupPhone(e.target.value)}
+                          aria-label={lang === "hi" ? "मोबाइल नंबर" : "Phone number"}
                           placeholder="10-digit mobile"
+                          autoComplete="tel"
+                          maxLength={20}
                           className="w-full px-3 py-2 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-xs text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E]"
                         />
                       </div>
@@ -599,7 +647,11 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                             type={showSignupPassword ? "text" : "password"}
                             value={signupPassword}
                             onChange={(e) => setSignupPassword(e.target.value)}
+                            aria-label={lang === "hi" ? "पासवर्ड" : "Password"}
                             placeholder="••••••••"
+                            autoComplete="new-password"
+                            minLength={4}
+                            maxLength={128}
                             className="w-full pl-3 pr-8 py-2 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-xs text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E]"
                             required
                           />
@@ -635,7 +687,9 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                             type="text"
                             value={abhaId}
                             onChange={(e) => setAbhaId(e.target.value)}
+                            aria-label={lang === "hi" ? "आभा स्वास्थ्य आईडी" : "ABHA health ID"}
                             placeholder="14-digit ABHA number (e.g. 91-1234-5678-9012)"
+                            maxLength={20}
                             className="w-full px-3 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs font-mono text-[#121C18] dark:text-[#F2F6F4]"
                           />
                         </div>
@@ -649,7 +703,11 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                               type="number"
                               value={age}
                               onChange={(e) => setAge(e.target.value)}
+                              aria-label={lang === "hi" ? "उम्र वर्ष में" : "Age in years"}
                               placeholder="e.g. 42"
+                              min={0}
+                              max={130}
+                              step={1}
                               className="w-full px-3 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs text-[#121C18] dark:text-[#F2F6F4]"
                             />
                           </div>
@@ -660,6 +718,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                             <select
                               value={gender}
                               onChange={(e) => setGender(e.target.value)}
+                              aria-label={lang === "hi" ? "लिंग" : "Gender"}
                               className="w-full px-3 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs text-[#121C18] dark:text-[#F2F6F4]"
                             >
                               <option value="male">{lang === "hi" ? "पुरुष (Male)" : "Male"}</option>
@@ -682,7 +741,9 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                             type="text"
                             value={specialization}
                             onChange={(e) => setSpecialization(e.target.value)}
+                            aria-label={lang === "hi" ? "क्लिनिकल विशेषज्ञता" : "Clinical specialization"}
                             placeholder="e.g. Orthopedic Surgery, Interventional Cardiology, Kayachikitsa"
+                            maxLength={160}
                             className="w-full px-3 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs text-[#121C18] dark:text-[#F2F6F4]"
                           />
                         </div>
@@ -693,6 +754,7 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                           <select
                             value={department}
                             onChange={(e) => setDepartment(e.target.value)}
+                            aria-label={lang === "hi" ? "ओपीडी विभाग" : "OPD clinical specialty"}
                             className="w-full px-3 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs text-[#121C18] dark:text-[#F2F6F4]"
                           >
                             <option value="general_medicine">General Medicine</option>
@@ -718,7 +780,9 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                               type="text"
                               value={hospital}
                               onChange={(e) => setHospital(e.target.value)}
+                              aria-label={lang === "hi" ? "अस्पताल या क्लिनिक" : "Hospital or clinic"}
                               placeholder="e.g. City Care Hospital"
+                              maxLength={160}
                               className="w-full px-3 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs text-[#121C18] dark:text-[#F2F6F4]"
                             />
                           </div>
@@ -730,7 +794,9 @@ export default function AuthScreen({ lang, onAuthSuccess, onGuestBypass }) {
                               type="text"
                               value={cabin}
                               onChange={(e) => setCabin(e.target.value)}
+                              aria-label={lang === "hi" ? "केबिन या कमरा" : "Cabin or room"}
                               placeholder="e.g. Cabin 104"
+                              maxLength={80}
                               className="w-full px-3 py-1.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs text-[#121C18] dark:text-[#F2F6F4]"
                             />
                           </div>

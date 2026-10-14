@@ -7,14 +7,14 @@ export default function FaqSection({ isOpen, onClose, lang = "en" }) {
     {
       qEn: "How does the MediKiosk clinical intake work?",
       qHi: "MediKiosk क्लिनिकल साक्षात्कार कैसे काम करता है?",
-      aEn: "MediKiosk guides you through a standardized clinical history intake. It records chief complaints, Ayurvedic Dashavidha Pariksha findings, and previous prescriptions, then routes them directly to the attending doctor's OPD console.",
-      aHi: "MediKiosk आपको मानकीकृत नैदानिक इतिहास संकलन के माध्यम से मार्गदर्शन करता है। यह आपके मुख्य लक्षणों, दशविध परीक्षा एवं पूर्व पर्चों को संकलित कर सीधे ओपीडी डॉक्टर के कंसोल पर भेजता है।",
+      aEn: "MediKiosk guides you through a nine-stage clinical history intake. You can select a doctor across specialties, choose which available records to share, and send a consultation request to the doctor workstation.",
+      aHi: "MediKiosk नौ चरणों के नैदानिक इतिहास संकलन में आपका मार्गदर्शन करता है। आप विभिन्न विशेषज्ञताओं में डॉक्टर चुन सकते हैं, साझा करने योग्य रिकॉर्ड चुन सकते हैं और डॉक्टर वर्कस्टेशन पर परामर्श अनुरोध भेज सकते हैं।",
     },
     {
       qEn: "Is my personal and medical data safe under Indian regulations?",
       qHi: "क्या मेरा स्वास्थ्य डेटा भारतीय कानूनों के तहत सुरक्षित है?",
-      aEn: "Yes. MediKiosk complies with the Digital Personal Data Protection (DPDP) Act 2023 and Ayushman Bharat Digital Mission (ABDM) standards. Your clinical data is encrypted and accessible solely by the authorized attending doctor.",
-      aHi: "हाँ। MediKiosk डिजिटल व्यक्तिगत डेटा संरक्षण (DPDP) अधिनियम 2023 एवं ABDM मानकों का कड़ाई से पालन करता है। आपका डेटा सुरक्षित है और केवल अधिकृत डॉक्टर ही देख सकते हैं।",
+      aEn: "No. MediKiosk is a prototype and is not certified for DPDP or ABDM compliance. Its backend does not yet enforce authenticated, doctor-specific access to clinical records. Do not enter real patient data.",
+      aHi: "नहीं। MediKiosk एक प्रोटोटाइप है और DPDP या ABDM अनुपालन के लिए प्रमाणित नहीं है। बैकएंड अभी क्लिनिकल रिकॉर्ड के लिए प्रमाणित लॉगिन और डॉक्टर-विशिष्ट पहुंच लागू नहीं करता। वास्तविक मरीज डेटा दर्ज न करें।",
     },
     {
       qEn: "Can I switch language between English and Hindi during the intake?",
@@ -25,8 +25,8 @@ export default function FaqSection({ isOpen, onClose, lang = "en" }) {
     {
       qEn: "What if I do not have an ABHA ID or Aadhaar card?",
       qHi: "अगर मेरे पास आभा (ABHA) आईडी या आधार नहीं है तो?",
-      aEn: "You can proceed directly as a walk-in patient without an account. The kiosk assigns an OPD token, and your ABHA ID can be linked later at the hospital desk.",
-      aHi: "आप बिना खाते के सीधे वॉक-इन मरीज के रूप में आगे बढ़ सकते हैं। कियोस्क आपको ओपीडी टोकन जारी करेगा, और आभा आईडी बाद में अस्पताल काउंटर पर जोड़ी जा सकती है।",
+      aEn: "ABHA is optional in this prototype. You can continue as a walk-in patient without entering an ABHA ID; this demo does not connect to an ABHA service.",
+      aHi: "इस प्रोटोटाइप में ABHA वैकल्पिक है। आप ABHA आईडी के बिना वॉक-इन मरीज के रूप में आगे बढ़ सकते हैं; यह डेमो किसी ABHA सेवा से जुड़ा नहीं है।",
     },
     {
       qEn: "Can I scan past prescriptions and laboratory blood tests?",

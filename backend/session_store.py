@@ -680,13 +680,21 @@ def get_all_sessions_summary() -> list[dict]:
                         "has_summary": bool(s.get("summary")),
                         "is_approved": bool(s.get("route")),
                         "chief_complaint": (s.get("transcript") or {}).get("chief_complaint") or (s.get("summary") or {}).get("chief_complaint"),
-                        "documents_count": len(s.get("documents") or []),
+                        "documents_count": sum(
+                            1 for document in s.get("documents") or []
+                            if not document.get("patient_record")
+                        ) if s.get("demonstration_active", True) else 0,
                         "consulting_doctor": s.get("consulting_doctor"),
                         "status": s.get("status") or "waiting",
                         "demonstration_active": bool(s.get("demonstration_active") if s.get("demonstration_active") is not None else True),
-                        "attached_records_count": len(s.get("attached_records") or []),
-                        "attached_records": s.get("attached_records") or [],
-                        "share_past_history": bool(s.get("share_past_history") if s.get("share_past_history") is not None else True),
+                        "attached_records_count": len(s.get("attached_records") or [])
+                        if s.get("demonstration_active", True) else 0,
+                        "attached_records": s.get("attached_records") or []
+                        if s.get("demonstration_active", True) else [],
+                        "share_past_history": bool(
+                            s.get("share_past_history")
+                            if s.get("share_past_history") is not None else True
+                        ) and bool(s.get("demonstration_active", True)),
                         "called_at": s.get("called_at"),
                     }
                     for s in sessions
@@ -717,13 +725,21 @@ def get_all_sessions_summary() -> list[dict]:
             "has_summary": bool(s.get("summary")),
             "is_approved": bool(s.get("route")),
             "chief_complaint": (s.get("transcript") or {}).get("chief_complaint") or (s.get("summary") or {}).get("chief_complaint"),
-            "documents_count": len(s.get("documents") or []),
+            "documents_count": sum(
+                1 for document in s.get("documents") or []
+                if not document.get("patient_record")
+            ) if s.get("demonstration_active", True) else 0,
             "consulting_doctor": s.get("consulting_doctor"),
             "status": s.get("status") or "waiting",
             "demonstration_active": bool(s.get("demonstration_active") if s.get("demonstration_active") is not None else True),
-            "attached_records_count": len(s.get("attached_records") or []),
-            "attached_records": s.get("attached_records") or [],
-            "share_past_history": bool(s.get("share_past_history") if s.get("share_past_history") is not None else True),
+            "attached_records_count": len(s.get("attached_records") or [])
+            if s.get("demonstration_active", True) else 0,
+            "attached_records": s.get("attached_records") or []
+            if s.get("demonstration_active", True) else [],
+            "share_past_history": bool(
+                s.get("share_past_history")
+                if s.get("share_past_history") is not None else True
+            ) and bool(s.get("demonstration_active", True)),
             "called_at": s.get("called_at"),
         }
         for s in sessions
@@ -1006,4 +1022,3 @@ def seed_demo_patients_if_empty():
 
 # Initialize on import
 seed_demo_patients_if_empty()
-

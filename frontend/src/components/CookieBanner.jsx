@@ -23,15 +23,6 @@ export default function CookieBanner({ lang = "en" }) {
     setShow(false);
   };
 
-  const handleDecline = () => {
-    try {
-      localStorage.setItem("medikiosk_cookie_consent", "essential_only");
-    } catch {
-      // ignore
-    }
-    setShow(false);
-  };
-
   if (!show) return null;
 
   return (
@@ -53,27 +44,20 @@ export default function CookieBanner({ lang = "en" }) {
         </div>
         <div className="flex-1">
           <h2 className="text-xs sm:text-sm font-bold text-[#121C18] dark:text-[#F2F6F4]">
-            {lang === "hi" ? "डेटा गोपनीयता एवं सत्र कुकीज़" : "Privacy & Essential Session Storage"}
+            {lang === "hi" ? "स्थानीय डेटा और गोपनीयता सूचना" : "Local data & privacy notice"}
           </h2>
           <p className="mt-1 text-xs text-[#4A5852] dark:text-[#8D9E97] leading-relaxed">
             {lang === "hi"
-              ? "MediKiosk आपके OPD सत्र, भाषा प्राथमिकता और क्लिनिकल टोकन को सुरक्षित रखने के लिए आवश्यक स्थानीय मेमोरी का उपयोग करता है (ABDM व DPDP Act 2023 के तहत)।"
-              : "MediKiosk uses secure local storage to retain your OPD token, clinical progress, and language preferences in compliance with the DPDP Act 2023 & ABDM guidelines."}
+              ? "यह प्रोटोटाइप इस डिवाइस के ब्राउज़र में आपकी साइन-इन प्रोफ़ाइल (जिसमें ABHA आईडी हो सकती है), थीम और इस सूचना की स्थिति सहेजता है। यह सुरक्षित क्लिनिकल सत्र या प्रमाणित DPDP/ABDM प्रणाली नहीं है। वास्तविक मरीज का डेटा दर्ज न करें।"
+              : "This prototype stores your sign-in profile (which may include an ABHA ID), theme choice, and this notice preference in browser storage. It is not a secure clinical session or a certified DPDP/ABDM system. Do not enter real patient data."}
           </p>
           <div className="mt-3 flex items-center gap-2">
             <button
               type="button"
               onClick={handleAccept}
-              className="px-3.5 py-1.5 rounded text-xs font-semibold text-white bg-[#0D5C4E] hover:bg-[#09453A] transition-colors"
+              className="min-h-[44px] px-4 rounded-md text-xs font-semibold text-white bg-[#0D5C4E] hover:bg-[#09453A] transition-colors"
             >
-              {lang === "hi" ? "स्वीकार करें" : "Accept Session Data"}
-            </button>
-            <button
-              type="button"
-              onClick={handleDecline}
-              className="px-3 py-1.5 rounded text-xs font-semibold text-[#4A5852] dark:text-[#8D9E97] border border-[#D3DDD8] dark:border-[#24352F] hover:bg-[#FAFBF9] dark:hover:bg-[#1A2622] transition-colors"
-            >
-              {lang === "hi" ? "केवल आवश्यक" : "Essential Only"}
+              {lang === "hi" ? "समझ गया" : "Continue"}
             </button>
           </div>
         </div>

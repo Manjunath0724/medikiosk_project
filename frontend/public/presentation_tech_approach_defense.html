@@ -186,7 +186,6 @@
     </div>
     <div style="display: flex; gap: 10px; align-items: center;">
       <span class="badge">Slide 3 Defense Guide</span>
-      <a href="SIH_Technical_Approach_Defense.pdf" download class="print-btn no-print" style="background: #2563eb; text-decoration: none; display: inline-flex; align-items: center; gap: 4px;">📥 Download PDF</a>
       <button class="print-btn no-print" onclick="window.print()">🖨️ Print / Save as PDF</button>
     </div>
   </div>
@@ -195,8 +194,8 @@
   <div class="speech-box">
     <h2>🎯 Spoken Presentation Pitch (Say This to the Presenters / Jury)</h2>
     <p>
-      <em>"Respected Evaluators, our solution bridges the severe doctor-patient time deficit in Indian OPDs through a 7-stage AI and ABDM-integrated clinical intake pipeline. At the front-line, patients interact via voice and touch on low-cost <strong>Kiosks, Tablets, or Mobile PWA</strong> powered by <strong>React and React Native</strong>, with bilingual <strong>Speech AI</strong> supporting low-literacy citizens.</em><br><br>
-      <em>Our asynchronous <strong>Python + FastAPI</strong> backend orchestrates a clinical <strong>LLM with RAG</strong> that drives adaptive, disease-aware case-taking using the clinical SOCRATES and AYUSH Dashavidha frameworks—strictly adhering to a non-diagnostic scribe model. Concurrently, <strong>PaddleOCR and vision models</strong> extract legacy handwritten prescriptions and flag abnormal lab biomarkers. Everything unifies into a longitudinal record in <strong>PostgreSQL</strong>, generating an AI clinical summary with real-time Red-Flag triage. Crucially, the attending physician remains the sole diagnostic authority on the <strong>Doctor Console</strong>, reviewing and approving the case sheet before our engine compiles it into an <strong>ABDM NRCES-compliant FHIR R4 Bundle</strong> under strict DPDP Act 2023 encryption and RBAC."</em>
+      <em>"MediKiosk is a React and FastAPI prototype that guides patients through a nine-stage multispecialty intake, routes consultation requests to a doctor workstation, and offers consent-aware demonstration record viewing. Its FHIR R4 output is an example bundle; the prototype has no live ABHA or ABDM connection."</em><br><br>
+      <em>"This is not a clinical deployment: backend endpoints do not enforce authenticated, doctor-specific authorization, and the report viewer cannot prevent screenshots or other capture. Do not enter real patient data."</em>
     </p>
   </div>
 
@@ -341,7 +340,7 @@
     <div class="qa-group">
       <div class="question">❓ Jury: "What ABDM milestones and FHIR resources are implemented?"</div>
       <div class="answer">
-        <strong>Defense:</strong> We comply with ABDM Milestone 1 (ABHA creation and verification), Milestone 2 (HIP - Health Information Provider for pushing records), and Milestone 3 (HIU - Health Information User for pulling historical records with consent). We generate NRCES-compliant FHIR R4 Document Bundles containing <code>Patient</code>, <code>Composition</code>, <code>Condition</code>, and <code>Observation</code> resources.
+        <strong>Defense:</strong> No ABDM milestones or ABHA integration are implemented in this prototype. The application generates a demonstration FHIR R4 bundle; production conformance has not been certified.
       </div>
     </div>
   </div>
@@ -349,13 +348,13 @@
   <!-- Tech 9 -->
   <div class="card">
     <div class="card-header">
-      <span class="tech-title">🔒 9. Encryption + RBAC (DPDP Act 2023)</span>
+      <span class="tech-title">🔒 9. Prototype Security Limitations</span>
       <span class="tech-role">Security, Privacy & Access Control</span>
     </div>
     <div class="qa-group">
-      <div class="question">❓ Jury: "How does your architecture guarantee compliance with the DPDP Act 2023?"</div>
+      <div class="question">❓ Jury: "What security controls are available, and what remains open?"</div>
       <div class="answer">
-        <strong>Defense:</strong> We enforce explicit purpose-limited informed consent before data intake. All data is encrypted using AES-256 at rest and TLS 1.3 in transit. Role-Based Access Control (RBAC) ensures doctors only access assigned patients, and all transactions create tamper-evident immutable audit logs.
+        <strong>Defense:</strong> The demo includes a patient-controlled consent toggle and locks the in-app viewer after sharing is revoked. However, backend authorization, secure server sessions, encryption guarantees, and audit logging are not implemented. The role check is client-side only; do not use real patient data.
       </div>
     </div>
   </div>

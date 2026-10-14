@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { t } from "../i18n.js";
 import { api } from "../api.js";
 
@@ -72,7 +72,7 @@ function IconArrowRight({ className = "w-4 h-4" }) {
 
 export default function Identify({ lang, setLang, onSessionStart, currentUser }) {
   const [step, setStep] = useState("form"); // "form" | "consent" | "disagreed"
-  const [department, setDepartment] = useState(currentUser?.department || "ayush");
+  const [department, setDepartment] = useState("general");
   const [name, setName] = useState(currentUser?.full_name || "");
   const [token, setToken] = useState("");
   const [abhaId, setAbhaId] = useState(currentUser?.abha_id || "");
@@ -84,6 +84,8 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
   const [specialtyFilter, setSpecialtyFilter] = useState("all");
   const [doctorsList, setDoctorsList] = useState([]);
   const [loadingDoctors, setLoadingDoctors] = useState(false);
+  const [doctorSearchError, setDoctorSearchError] = useState("");
+  const [doctorSearchRetry, setDoctorSearchRetry] = useState(0);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
 
   // Fetch doctors based on search & specialty filter
@@ -95,17 +97,19 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
         const spec = specialtyFilter === "all" ? "" : specialtyFilter;
         const docs = await api.getDoctors(doctorQuery, spec);
         if (active) {
-          setDoctorsList(docs || []);
-          // Auto-select first matching doctor if none selected
-          if (!selectedDoctor && docs && docs.length > 0) {
-            setSelectedDoctor(docs[0]);
-            if (docs[0].department) {
-              setDepartment(docs[0].department);
-            }
-          }
+          const docList = Array.isArray(docs) ? docs : (docs?.doctors || []);
+          setDoctorsList(docList);
+          setDoctorSearchError("");
         }
-      } catch {
-        // Fallback gracefully
+      } catch (err) {
+        if (active) {
+          setDoctorSearchError(
+            err?.message ||
+              (lang === "hi"
+                ? "डॉक्टर सूची उपलब्ध नहीं है। कृपया फिर से प्रयास करें।"
+                : "The doctor list is unavailable. Please try again.")
+          );
+        }
       } finally {
         if (active) setLoadingDoctors(false);
       }
@@ -116,7 +120,7 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
       active = false;
       clearTimeout(timer);
     };
-  }, [doctorQuery, specialtyFilter]);
+  }, [doctorQuery, specialtyFilter, doctorSearchRetry, lang]);
 
   const handleAgree = async () => {
     setSubmitting(true);
@@ -146,7 +150,7 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
   return (
     <main
       id="main-content"
-      className="flex-1 w-full bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] transition-colors"
+      className="kiosk-screen flex-1 w-full bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] transition-colors"
     >
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10 lg:py-14">
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-10 lg:gap-14 items-start">
@@ -170,92 +174,176 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
 
             <p className="text-sm text-[#4A5852] dark:text-[#8D9E97] leading-relaxed max-w-xl">
               {lang === "hi"
-                ? "कृपया अपना नाम और उपयुक्त ओपीडी विभाग चुनें। यदि आपके पास 14-अंकीय आभा (ABHA) आईडी है, तो इसे दर्ज करें ताकि आपका स्वास्थ्य इतिहास डॉक्टर के पास सुरक्षित रूप से पहुंच सके।"
-                : "Select the clinical department matching your symptoms. Enter your legal name and optional 14-digit ABHA health ID to link previous hospital records to your attending physician."}
+                ? "कृपया अपना नाम और उपयुक्त ओपीडी विभाग चुनें। ABHA आईडी वैकल्पिक है और इस प्रोटोटाइप में किसी बाहरी स्वास्थ्य सेवा से नहीं जुड़ती।"
+                : "Choose a specialty for your symptoms. An ABHA ID is optional and is not connected to an external health service in this prototype."}
             </p>
 
-            {/* Department Comparison Cards (Architectural 1px Borders) */}
+            {/* Search Option for Doctors & Hospitals Across All Specialties */}
             <div className="space-y-3 pt-2">
-              <div
-                onClick={() => setDepartment("ayush")}
-                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
-                  department === "ayush"
-                    ? "border-[#0D5C4E] bg-white dark:bg-[#15201C] ring-1 ring-[#0D5C4E]"
-                    : "border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#4A5852]"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5 font-bold text-sm text-[#121C18] dark:text-[#F2F6F4]">
-                    <IconLeaf className="w-4 h-4 text-[#0D5C4E] dark:text-[#15806C]" />
-                    <span>{t(lang, "deptAyush")}</span>
-                  </div>
-                  {department === "ayush" && (
-                    <span className="text-[10px] font-mono uppercase font-bold text-[#0D5C4E] dark:text-[#15806C]">
-                      Selected
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-[#4A5852] dark:text-[#8D9E97] mt-1.5 leading-normal">
-                  {t(lang, "deptAyushDesc")}
-                </p>
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold uppercase tracking-wider text-[#0D5C4E] dark:text-[#15806C] flex items-center gap-1.5">
+                  <IconStethoscope className="w-3.5 h-3.5" />
+                  <span>{lang === "hi" ? "परामर्श हेतु चिकित्सक एवं क्लिनिक खोजें" : "Find Consulting Doctor & Hospital / Clinic"}</span>
+                </span>
+                <span className="text-[10px] text-[#4A5852] dark:text-[#8D9E97] font-mono">
+                  {doctorsList.length} {lang === "hi" ? "उपलब्ध" : "available"}
+                </span>
               </div>
 
-              <div
-                onClick={() => setDepartment("integrated")}
-                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
-                  department === "integrated"
-                    ? "border-[#0D5C4E] bg-white dark:bg-[#15201C] ring-1 ring-[#0D5C4E]"
-                    : "border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#4A5852]"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5 font-bold text-sm text-[#121C18] dark:text-[#F2F6F4]">
-                    <IconCaduceus className="w-4 h-4 text-[#0D5C4E] dark:text-[#15806C]" />
-                    <span>{t(lang, "deptIntegrated")}</span>
-                  </div>
-                  {department === "integrated" && (
-                    <span className="text-[10px] font-mono uppercase font-bold text-[#0D5C4E] dark:text-[#15806C]">
-                      Selected
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-[#4A5852] dark:text-[#8D9E97] mt-1.5 leading-normal">
-                  {t(lang, "deptIntegratedDesc")}
-                </p>
+              {/* Search Input */}
+              <div className="relative">
+                <input
+                  type="text"
+                  value={doctorQuery}
+                  onChange={(e) => setDoctorQuery(e.target.value)}
+                  aria-label={lang === "hi" ? "डॉक्टर, अस्पताल या विशेषज्ञता खोजें" : "Search doctors, clinics, or specialties"}
+                  placeholder={
+                    lang === "hi"
+                      ? "डॉक्टर का नाम, अस्पताल या विशेषज्ञता खोजें..."
+                      : "Search doctor name, hospital, or specialty (e.g. Mehta, Orthopedics, Apollo)..."
+                  }
+                  className="w-full pl-9 pr-3.5 py-2.5 rounded-lg border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] text-xs text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E] focus:ring-1 focus:ring-[#0D5C4E] transition-colors"
+                />
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-[#4A5852] dark:text-[#8D9E97]">
+                  🔍
+                </span>
+                {doctorQuery && (
+                  <button
+                    type="button"
+                    onClick={() => setDoctorQuery("")}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-[#4A5852] hover:text-[#121C18]"
+                  >
+                    ✕
+                  </button>
+                )}
               </div>
 
-              <div
-                onClick={() => setDepartment("general")}
-                className={`p-4 rounded-lg border cursor-pointer transition-colors ${
-                  department === "general"
-                    ? "border-[#0D5C4E] bg-white dark:bg-[#15201C] ring-1 ring-[#0D5C4E]"
-                    : "border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] hover:border-[#4A5852]"
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5 font-bold text-sm text-[#121C18] dark:text-[#F2F6F4]">
-                    <IconStethoscope className="w-4 h-4 text-[#0D5C4E] dark:text-[#15806C]" />
-                    <span>{t(lang, "deptGeneral")}</span>
-                  </div>
-                  {department === "general" && (
-                    <span className="text-[10px] font-mono uppercase font-bold text-[#0D5C4E] dark:text-[#15806C]">
-                      Selected
-                    </span>
-                  )}
-                </div>
-                <p className="text-xs text-[#4A5852] dark:text-[#8D9E97] mt-1.5 leading-normal">
-                  {t(lang, "deptGeneralDesc")}
-                </p>
+              {/* Specialty Filter Pills */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 text-[11px] scrollbar-none">
+                {[
+                  { id: "all", label: lang === "hi" ? "सभी" : "All Specialties" },
+                  { id: "general", label: "General Med" },
+                  { id: "cardio", label: "Cardiology" },
+                  { id: "ortho", label: "Orthopedics" },
+                  { id: "ayush", label: "Ayush / Ayurveda" },
+                  { id: "internal", label: "Internal Med" },
+                  { id: "neuro", label: "Neurology" },
+                  { id: "pedia", label: "Pediatrics" },
+                  { id: "derma", label: "Dermatology" },
+                ].map((spec) => (
+                  <button
+                    key={spec.id}
+                    type="button"
+                    onClick={() => setSpecialtyFilter(spec.id)}
+                    aria-pressed={specialtyFilter === spec.id}
+                    className={`px-2.5 py-1 rounded-full whitespace-nowrap text-[11px] font-semibold transition-colors border ${
+                      specialtyFilter === spec.id
+                        ? "bg-[#0D5C4E] text-white border-[#0D5C4E]"
+                        : "bg-white dark:bg-[#15201C] text-[#4A5852] dark:text-[#8D9E97] border-[#D3DDD8] dark:border-[#24352F] hover:border-[#0D5C4E]"
+                    }`}
+                  >
+                    {spec.label}
+                  </button>
+                ))}
               </div>
+
+              {/* Doctor Selection Cards (Scrollable List) */}
+              <div className="space-y-2 max-h-[290px] overflow-y-auto pr-1">
+                {loadingDoctors && (
+                  <div role="status" aria-live="polite" className="py-6 text-center text-xs text-[#4A5852] dark:text-[#8D9E97]">
+                    {lang === "hi" ? "डॉक्टर सूची लोड हो रही है..." : "Finding available physicians..."}
+                  </div>
+                )}
+
+                {!loadingDoctors && doctorSearchError && (
+                  <div role="alert" className="p-4 rounded border border-[#B91C1C] bg-[#FEF2F2] text-[#7F1D1D] text-xs">
+                    <p>{doctorSearchError}</p>
+                    <button
+                      type="button"
+                      onClick={() => setDoctorSearchRetry((attempt) => attempt + 1)}
+                      className="mt-2 min-h-[40px] rounded-md border border-[#B91C1C] px-3 font-semibold text-[#7F1D1D] hover:bg-white focus-visible:outline"
+                    >
+                      {lang === "hi" ? "फिर से प्रयास करें" : "Try again"}
+                    </button>
+                  </div>
+                )}
+
+                {!loadingDoctors && !doctorSearchError && doctorsList.length === 0 && (
+                  <div className="p-4 rounded border border-dashed border-[#D3DDD8] dark:border-[#24352F] text-center text-xs text-[#4A5852] dark:text-[#8D9E97]">
+                    {lang === "hi"
+                      ? "कोई डॉक्टर नहीं मिला। कृपया दूसरा कीवर्ड खोजें।"
+                      : "No doctors match this search. Try another name or specialty."}
+                  </div>
+                )}
+
+                {!loadingDoctors &&
+                  doctorsList.map((doc) => {
+                    const isSelected = selectedDoctor?.id === doc.id;
+                    return (
+                      <button
+                        type="button"
+                        key={doc.id}
+                        aria-pressed={isSelected}
+                        onClick={() => {
+                          setSelectedDoctor(doc);
+                          setError("");
+                          if (doc.department) setDepartment(doc.department);
+                        }}
+                        className={`w-full text-left p-3 rounded-lg border cursor-pointer transition-all ${
+                          isSelected
+                            ? "border-[#0D5C4E] bg-white dark:bg-[#15201C] ring-2 ring-[#0D5C4E]/60 shadow-xs"
+                            : "border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#15201C] hover:border-[#4A5852]"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div>
+                            <div className="flex items-center gap-2">
+                              <span className="font-bold text-xs sm:text-sm text-[#121C18] dark:text-[#F2F6F4]">
+                                {doc.full_name}
+                              </span>
+                              <span className="text-[10px] uppercase font-mono font-bold px-1.5 py-0.5 rounded bg-emerald-50 dark:bg-emerald-950 text-[#0D5C4E] dark:text-[#8BE3D2] border border-[#0D5C4E]/20">
+                                {doc.specialization?.split("&")[0]?.trim() || doc.department}
+                              </span>
+                            </div>
+                            <p className="text-[11px] text-[#4A5852] dark:text-[#8D9E97] mt-0.5">
+                              {doc.hospital || "City Care Multispecialty"} •{" "}
+                              <strong className="text-[#0D5C4E] dark:text-[#15806C]">
+                                {doc.cabin || "Cabin 101"}
+                              </strong>
+                            </p>
+                          </div>
+
+                          <div className="shrink-0 flex items-center">
+                            {isSelected ? (
+                              <span className="flex items-center gap-1 text-[11px] font-bold text-[#0D5C4E] dark:text-[#15806C]">
+                                <span>✓</span>
+                                <span className="hidden sm:inline">Selected</span>
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-[#4A5852] dark:text-[#8D9E97] font-semibold hover:underline">
+                                Select →
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+              </div>
+              {error && step === "form" && (
+                <div role="alert" className="p-3 rounded border border-[#B91C1C] bg-[#FEF2F2] text-[#B91C1C] text-xs font-semibold">
+                  {error}
+                </div>
+              )}
             </div>
 
-            {/* Compliance strip */}
+            {/* Data sharing notice */}
             <div className="pt-2 border-t border-[#D3DDD8] dark:border-[#24352F] text-xs text-[#4A5852] dark:text-[#8D9E97]">
               <span className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">
                 {t(lang, "dpdpNotice")}
               </span>
               <p className="mt-0.5 leading-normal">
-                Encrypted clinical intake transmitted exclusively to the assigned hospital doctor station.
+                Only the records you select are attached to this consultation request. This prototype does not provide certified compliance or secure clinical access controls.
               </p>
             </div>
           </div>
@@ -285,6 +373,8 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
                       value={name}
                       onChange={(e) => setName(e.target.value)}
                       placeholder={t(lang, "namePlaceholder")}
+                      aria-label={t(lang, "nameLabel")}
+                      maxLength={120}
                       className="w-full px-3.5 py-2.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-sm text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E] focus:ring-1 focus:ring-[#0D5C4E]"
                       required
                     />
@@ -299,6 +389,8 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
                         value={token}
                         onChange={(e) => setToken(e.target.value)}
                         placeholder={lang === "hi" ? "स्वतः आवंटन (उदा. 04)" : "Auto-assigned if empty"}
+                        aria-label={t(lang, "tokenLabel")}
+                        maxLength={12}
                         className="w-full px-3 py-2.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-sm font-mono text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E]"
                       />
                     </div>
@@ -311,10 +403,32 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
                         value={abhaId}
                         onChange={(e) => setAbhaId(e.target.value)}
                         placeholder={t(lang, "abhaPlaceholder")}
+                        aria-label={t(lang, "abhaLabel")}
+                        maxLength={20}
                         className="w-full px-3 py-2.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-xs font-mono text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E]"
                       />
                     </div>
                   </div>
+
+                  {/* Selected Doctor Consultation Banner */}
+                  {selectedDoctor && (
+                    <div className="p-3.5 rounded border border-[#0D5C4E] bg-emerald-50/70 dark:bg-emerald-950/30 text-xs">
+                      <div className="flex items-center justify-between">
+                        <span className="font-bold text-[#0D5C4E] dark:text-[#8BE3D2] uppercase tracking-wider text-[10px]">
+                          {lang === "hi" ? "चयनित चिकित्सक" : "Selected Consulting Doctor"}
+                        </span>
+                        <span className="text-[10px] font-mono text-[#0D5C4E] font-bold">
+                          {selectedDoctor.cabin || "Cabin 101"}
+                        </span>
+                      </div>
+                      <p className="font-bold text-sm text-[#121C18] dark:text-[#F2F6F4] mt-0.5">
+                        {selectedDoctor.full_name}
+                      </p>
+                      <p className="text-[11px] text-[#4A5852] dark:text-[#8D9E97]">
+                        {selectedDoctor.specialization || selectedDoctor.department} • {selectedDoctor.hospital}
+                      </p>
+                    </div>
+                  )}
 
                   <div className="p-3.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-[#FAFBF9] dark:bg-[#0E1513] text-xs text-[#4A5852] dark:text-[#8D9E97]">
                     <p className="font-semibold text-[#121C18] dark:text-[#F2F6F4]">
@@ -329,10 +443,25 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
 
                   <button
                     type="button"
-                    onClick={() => setStep("consent")}
+                    onClick={() => {
+                      if (!selectedDoctor) {
+                        setError(
+                          lang === "hi"
+                            ? "क्लिनिकल संवाद शुरू करने से पहले कृपया डॉक्टर या क्लिनिक चुनें।"
+                            : "Select a doctor or clinic before starting the clinical intake."
+                        );
+                        return;
+                      }
+                      setError("");
+                      setStep("consent");
+                    }}
                     className="w-full min-h-[44px] py-2.5 px-4 rounded bg-[#0D5C4E] hover:bg-[#09453A] text-white font-semibold text-sm transition-colors flex items-center justify-center gap-2"
                   >
-                    <span>{t(lang, "startButton")}</span>
+                    <span>
+                      {lang === "hi"
+                        ? "9-चरणीय SOCRATES क्लिनिकल संवाद प्रारंभ करें"
+                        : "Begin 9-Stage SOCRATES Intake Interview"}
+                    </span>
                     <IconArrowRight className="w-4 h-4" />
                   </button>
                 </div>
@@ -342,7 +471,7 @@ export default function Identify({ lang, setLang, onSessionStart, currentUser })
                 <div className="space-y-5">
                   <div className="flex items-center gap-2 text-xs font-bold text-[#0D5C4E] dark:text-[#15806C] uppercase tracking-wider">
                     <IconShield className="w-4 h-4" />
-                    <span>DPDP Act 2023 & ABDM Consent Protocol</span>
+                    <span>{lang === "hi" ? "साझा करने से पहले आपकी अनुमति" : "Your permission before sharing"}</span>
                   </div>
 
                   <h2 className="text-lg font-bold font-display text-[#121C18] dark:text-[#F2F6F4]">

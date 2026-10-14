@@ -8,7 +8,7 @@ class SessionStartRequest(BaseModel):
     name: Optional[str] = None
     token: Optional[str] = None
     abha_id: Optional[str] = None
-    department: Optional[str] = Field(default="ayush", description="'ayush', 'general', 'integrated', 'cardiology', 'orthopedics', etc.")
+    department: Optional[str] = Field(default="general", description="Selected doctor's clinical specialty.")
     chief_complaint: Optional[str] = None
     consent: bool = True
     consulting_doctor: Optional[dict] = None
@@ -81,7 +81,7 @@ class DoctorChatResponse(BaseModel):
 
 class QuickBookRequest(BaseModel):
     name: Optional[str] = "Walk-in Patient"
-    department: Optional[str] = "ayush"
+    department: Optional[str] = "general"
     language: Optional[str] = "en"
     abha_id: Optional[str] = None
     chief_complaint: Optional[str] = None
@@ -114,7 +114,6 @@ class AuthResponse(BaseModel):
     message: str
     user: Optional[dict] = None
     token: Optional[str] = None
-
 
 
 

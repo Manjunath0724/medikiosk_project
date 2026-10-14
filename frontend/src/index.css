@@ -15,6 +15,7 @@ body {
   color: #121C18;
   font-family: "Noto Sans", "Noto Sans Devanagari", system-ui, -apple-system, sans-serif;
   line-height: 1.65;
+  text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -70,6 +71,111 @@ html.dark ::-webkit-scrollbar-thumb:hover {
   outline-offset: 2px;
 }
 
+button,
+input,
+select,
+textarea {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  touch-action: manipulation;
+  transition-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.985);
+}
+
+button:disabled {
+  cursor: not-allowed;
+}
+
+input,
+select,
+textarea {
+  accent-color: #0D5C4E;
+  scroll-margin-block: 1rem;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: #68766F;
+  opacity: 1;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #A3B2AB;
+}
+
+html {
+  scroll-behavior: smooth;
+  scrollbar-color: rgba(14, 110, 92, 0.4) transparent;
+}
+
+.kiosk-screen {
+  animation: kiosk-view-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.kiosk-screen button,
+.doctor-workstation button,
+.kiosk-shell > header button {
+  min-height: 44px;
+}
+
+html.dark .doctor-workstation aside {
+  background-color: #15201C;
+  border-color: #24352F;
+}
+
+html.dark .doctor-workstation aside .bg-white {
+  background-color: #15201C;
+}
+
+html.dark .doctor-workstation aside .bg-slate-50 {
+  background-color: #121C18;
+}
+
+html.dark .doctor-workstation aside .bg-slate-100 {
+  background-color: #1A2622;
+}
+
+html.dark .doctor-workstation aside .border-slate-100,
+html.dark .doctor-workstation aside .border-slate-200,
+html.dark .doctor-workstation aside .border-slate-300 {
+  border-color: #24352F;
+}
+
+html.dark .doctor-workstation aside .text-slate-900,
+html.dark .doctor-workstation aside .text-slate-800,
+html.dark .doctor-workstation aside .text-slate-700 {
+  color: #EAF3F0;
+}
+
+html.dark .doctor-workstation aside .text-slate-600,
+html.dark .doctor-workstation aside .text-slate-500,
+html.dark .doctor-workstation aside .text-slate-400 {
+  color: #A3B2AB;
+}
+
+html.dark .doctor-workstation aside button[class*="hover:bg-slate-"]:hover {
+  background-color: #24352F;
+}
+
+@keyframes kiosk-view-enter {
+  from {
+    opacity: 0.72;
+    transform: translateY(8px);
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
 .kiosk-tap {
   @apply min-h-[44px] px-4 py-2.5 rounded-md font-semibold transition-colors;
 }
@@ -97,6 +203,21 @@ html.dark ::-webkit-scrollbar-thumb:hover {
 
 .pulse-alert {
   animation: pulse-ring 1.6s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Print Stylesheet (Item 10) */

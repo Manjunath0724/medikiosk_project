@@ -105,7 +105,7 @@ export default function SiteSearch({ isOpen, onClose, onSelectAction, lang = "en
     {
       id: "faq",
       title: "Frequently Asked Questions (FAQ)",
-      subtitle: "ABDM compliance, privacy standards & kiosk help",
+      subtitle: "Privacy controls, record sharing, and kiosk help",
       category: "Help",
       iconType: "help",
       action: () => onSelectAction && onSelectAction("faq"),

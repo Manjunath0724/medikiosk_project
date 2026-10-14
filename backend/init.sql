@@ -10,7 +10,7 @@ CREATE DATABASE IF NOT EXISTS `medikiosk_db`
 USE `medikiosk_db`;
 
 -- ---------------------------------------------------------------------
--- Table 1: users (Authentication, Doctors, Patients & Staff)
+-- Table 1: users (Authentication, Doctors & Patients)
 -- ---------------------------------------------------------------------
 CREATE TABLE IF NOT EXISTS `users` (
     `id` VARCHAR(64) NOT NULL PRIMARY KEY,
@@ -20,8 +20,8 @@ CREATE TABLE IF NOT EXISTS `users` (
     `full_name` VARCHAR(255) NOT NULL,
     `password_hash` VARCHAR(255) NOT NULL,
     `salt` VARCHAR(64) NOT NULL,
-    `role` ENUM('patient', 'doctor', 'staff', 'admin') NOT NULL DEFAULT 'patient',
-    `department` VARCHAR(100) DEFAULT 'ayush',
+    `role` ENUM('patient', 'doctor') NOT NULL DEFAULT 'patient',
+    `department` VARCHAR(100) DEFAULT 'general',
     `specialization` VARCHAR(255) NULL,
     `abha_id` VARCHAR(100) NULL,
     `age` INT NULL,
@@ -38,7 +38,7 @@ CREATE TABLE IF NOT EXISTS `sessions` (
     `session_id` VARCHAR(64) NOT NULL PRIMARY KEY,
     `token_number` VARCHAR(50) NOT NULL,
     `patient_name` VARCHAR(255) NOT NULL DEFAULT 'Guest Patient',
-    `department` VARCHAR(50) NOT NULL DEFAULT 'ayush',
+    `department` VARCHAR(50) NOT NULL DEFAULT 'general',
     `language` VARCHAR(10) NOT NULL DEFAULT 'en',
     `abha_id` VARCHAR(100) NULL,
     `consent` BOOLEAN NOT NULL DEFAULT TRUE,

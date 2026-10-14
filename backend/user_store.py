@@ -23,6 +23,7 @@ def _sanitize_user(user: dict) -> dict:
     safe = dict(user)
     safe.pop("password_hash", None)
     safe.pop("salt", None)
+    safe["role"] = "doctor" if str(safe.get("role", "")).lower() == "doctor" else "patient"
     if isinstance(safe.get("created_at"), datetime):
         safe["created_at"] = safe["created_at"].isoformat()
     return safe
@@ -37,8 +38,19 @@ def _mysql_init_default_users():
     try:
         conn = database.get_connection()
         with conn.cursor() as cur:
-            cur.execute("SELECT username FROM users WHERE username IN ('patient', 'doctor')")
+            cur.execute("SELECT username FROM users WHERE username IN ('patient', 'doctor', 'dr_mehta', 'dr_kulkarni', 'dr_sen', 'dr_rathore', 'dr_deshmukh', 'dr_nair', 'dr_iyer')")
             existing = {row["username"].lower() for row in cur.fetchall()}
+
+            default_doctors = [
+                ("doctor", "doctor@ayush.gov.in", "9812345678", "Dr. Sunita Sharma", "ayush", "Ayush / Panchakarma & Integrative Medicine", "National Ayush Hospital & Research Center", "Cabin 101"),
+                ("dr_mehta", "arvind.mehta@apolloheart.org", "9823456781", "Dr. Arvind Mehta", "general", "Cardiology & Interventional Cardiology", "Apollo Heart & Vascular Institute", "Room 204"),
+                ("dr_kulkarni", "r.kulkarni@sanchetibone.org", "9834567812", "Dr. Rajesh Kulkarni", "general", "Orthopedics & Joint Replacement Surgery", "Sancheti Bone & Joint Center", "Cabin 108"),
+                ("dr_sen", "ananya.sen@citycareopd.org", "9845678123", "Dr. Ananya Sen", "general", "General Medicine & Diabetology", "City Care Multispecialty OPD", "Room 102"),
+                ("dr_rathore", "v.rathore@apexhealth.org", "9856781234", "Dr. Vikramaditya Rathore", "integrated", "Internal Medicine & Critical Care", "Apex Multispecialty Hospital", "Cabin 305"),
+                ("dr_deshmukh", "rohan.d@brainspine.org", "9867812345", "Dr. Rohan Deshmukh", "general", "Neurology & Neuro-Spine Science", "Brain & Spine Neuro Institute", "Room 212"),
+                ("dr_nair", "priya.nair@rainbowchild.org", "9878912345", "Dr. Priya Nair", "general", "Pediatrics & Child Wellness", "Rainbow Children's Clinic", "Cabin 105"),
+                ("dr_iyer", "meenakshi.i@clearskin.org", "9889123456", "Dr. Meenakshi Iyer", "general", "Dermatology & Skin Science", "ClearSkin Dermatology Center", "Room 114"),
+            ]
 
             if "patient" not in existing:
                 salt = secrets.token_hex(8)
@@ -63,26 +75,29 @@ def _mysql_init_default_users():
                     )
                 )
 
-            if "doctor" not in existing:
-                salt = secrets.token_hex(8)
-                cur.execute(
-                    """
-                    INSERT INTO users (id, username, email, phone, full_name, password_hash, salt, role, department, specialization)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    """,
-                    (
-                        f"usr_{uuid.uuid4().hex[:8]}",
-                        "doctor",
-                        "doctor@ayush.gov.in",
-                        "9812345678",
-                        "Dr. Sunita Sharma",
-                        _hash_password("doctor123", salt),
-                        salt,
-                        "doctor",
-                        "ayush",
-                        "Ayush / Panchakarma & General Medicine",
+            for d_user, d_email, d_phone, d_name, d_dept, d_spec, d_hosp, d_cab in default_doctors:
+                if d_user not in existing:
+                    salt = secrets.token_hex(8)
+                    cur.execute(
+                        """
+                        INSERT INTO users (id, username, email, phone, full_name, password_hash, salt, role, department, specialization, hospital, cabin)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        """,
+                        (
+                            f"usr_{uuid.uuid4().hex[:8]}",
+                            d_user,
+                            d_email,
+                            d_phone,
+                            d_name,
+                            _hash_password("doctor123", salt),
+                            salt,
+                            "doctor",
+                            d_dept,
+                            d_spec,
+                            d_hosp,
+                            d_cab,
+                        )
                     )
-                )
         conn.close()
     except Exception as e:
         logger.error(f"Error seeding default MySQL users: {e}")
@@ -358,6 +373,31 @@ def list_users() -> list:
         return _mysql_list_users()
     _json_init_default_users()
     return [_sanitize_user(u) for u in _json_load_users()]
+
+
+def get_doctors(specialty: str = None, query: str = None) -> list:
+    all_users = list_users()
+    doctors = [u for u in all_users if u.get("role") == "doctor"]
+
+    if specialty and specialty.strip() and specialty.lower() != "all":
+        s_clean = specialty.strip().lower()
+        doctors = [
+            d for d in doctors
+            if s_clean in (d.get("specialization") or "").lower()
+            or s_clean in (d.get("department") or "").lower()
+        ]
+
+    if query and query.strip():
+        q_clean = query.strip().lower()
+        doctors = [
+            d for d in doctors
+            if q_clean in (d.get("full_name") or "").lower()
+            or q_clean in (d.get("specialization") or "").lower()
+            or q_clean in (d.get("hospital") or "").lower()
+            or q_clean in (d.get("cabin") or "").lower()
+        ]
+
+    return doctors
 
 
 # Auto-initialize on import

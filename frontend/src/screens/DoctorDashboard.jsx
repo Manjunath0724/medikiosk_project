@@ -62,6 +62,22 @@ function IconAlert({ className = "w-4 h-4" }) {
     </svg>
   );
 }
+function IconLock({ className = "w-4 h-4" }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <rect x="5" y="10" width="14" height="11" rx="2" strokeWidth="1.8" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M8 10V7a4 4 0 118 0v3m-4 4v3" />
+    </svg>
+  );
+}
+function IconShield({ className = "w-4 h-4" }) {
+  return (
+    <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="M12 2.8 20 6v5.2c0 5-3.4 8.6-8 10-4.6-1.4-8-5-8-10V6l8-3.2z" />
+      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8" d="m8.5 12 2.2 2.2 4.8-4.8" />
+    </svg>
+  );
+}
 function IconSearch({ className = "w-4 h-4" }) {
   return (
     <svg className={className} fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden="true">
@@ -105,7 +121,7 @@ const SUMMARY_FIELDS = [
 
 function QuickBookModal({ isOpen, onClose, onBook, loading }) {
   const [name, setName] = useState("");
-  const [department, setDepartment] = useState("ayush");
+  const [department, setDepartment] = useState("general");
   const [language, setLanguage] = useState("en");
   const [chiefComplaint, setChiefComplaint] = useState("");
   const [abhaId, setAbhaId] = useState("");
@@ -115,11 +131,11 @@ function QuickBookModal({ isOpen, onClose, onBook, loading }) {
   const handleSubmit = (e) => {
     e.preventDefault();
     onBook({
-      patient_name: name.trim() || "Walk-in Patient",
+      name: name.trim() || "Walk-in Patient",
       department,
       language,
-      chief_complaint: chiefComplaint.trim() || undefined,
-      abha_id: abhaId.trim() || undefined,
+      chiefComplaint: chiefComplaint.trim() || undefined,
+      abhaId: abhaId.trim() || undefined,
     });
   };
 
@@ -166,6 +182,12 @@ function QuickBookModal({ isOpen, onClose, onBook, loading }) {
               >
                 <option value="ayush">Ayurveda OPD</option>
                 <option value="general">General Medicine</option>
+                <option value="internal">Internal Medicine</option>
+                <option value="orthopedics">Orthopedics</option>
+                <option value="cardiology">Cardiology</option>
+                <option value="pediatrics">Pediatrics</option>
+                <option value="dermatology">Dermatology</option>
+                <option value="neurology">Neurology</option>
                 <option value="integrated">Integrated OPD</option>
               </select>
             </div>
@@ -261,14 +283,55 @@ export default function DoctorDashboard({ lang = "en" }) {
   // Patient Queue
   const [queue, setQueue] = useState([]);
   const [queueLoading, setQueueLoading] = useState(false);
+  const [queueError, setQueueError] = useState("");
   const [showQuickBook, setShowQuickBook] = useState(false);
   const [bookingLoading, setBookingLoading] = useState(false);
+  const [callingSessionId, setCallingSessionId] = useState(null);
   const [searchFilter, setSearchFilter] = useState("");
-  const [queueCategory, setQueueCategory] = useState("all"); // "all" | "ayush" | "general" | "integrated" | "priority"
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [queueCategory, setQueueCategory] = useState("all"); // "all" | "waiting" | "called" | "priority"
+  const [sidebarOpen, setSidebarOpen] = useState(
+    () => typeof window === "undefined" || window.innerWidth >= 640
+  );
   const [sideAiOpen, setSideAiOpen] = useState(false);
   const [showRawFhir, setShowRawFhir] = useState(false);
   const [toast, setToast] = useState(null);
+  const [selectedScan, setSelectedScan] = useState(null); // Embedded read-only viewer modal
+  const [selectedScanFileUrl, setSelectedScanFileUrl] = useState("");
+  const [selectedScanFileLoading, setSelectedScanFileLoading] = useState(false);
+  const [selectedScanFileError, setSelectedScanFileError] = useState("");
+
+  const currentUser = (() => {
+    try {
+      const saved = localStorage.getItem("medikiosk_user");
+      if (!saved) return null;
+      const user = JSON.parse(saved);
+      if (
+        !user ||
+        typeof user !== "object" ||
+        typeof user.id !== "string" ||
+        !["doctor", "patient"].includes(user.role)
+      ) {
+        localStorage.removeItem("medikiosk_user");
+        return null;
+      }
+      const profile = {
+        id: user.id,
+        username: typeof user.username === "string" ? user.username : "",
+        role: user.role,
+        full_name: typeof user.full_name === "string" ? user.full_name : "",
+        department: typeof user.department === "string" ? user.department : "",
+        specialization: typeof user.specialization === "string" ? user.specialization : "",
+        hospital: typeof user.hospital === "string" ? user.hospital : "",
+        cabin: typeof user.cabin === "string" ? user.cabin : "",
+        abha_id: typeof user.abha_id === "string" ? user.abha_id : "",
+      };
+      localStorage.setItem("medikiosk_user", JSON.stringify(profile));
+      return profile;
+    } catch {
+      return null;
+    }
+  })();
+  const doctorId = currentUser?.role === "doctor" ? currentUser.id : null;
 
   const showToast = (message, type = "info") => {
     setToast({ message, type });
@@ -277,25 +340,150 @@ export default function DoctorDashboard({ lang = "en" }) {
     }, 4000);
   };
 
+  // Handle "Accept & Call" patient action (Requirement 5a)
+  const handleAcceptAndCall = async (targetSession) => {
+    if (!doctorId) return;
+    const sId = targetSession.session_id || targetSession;
+    if (callingSessionId === sId) return;
+    setCallingSessionId(sId);
+    try {
+      const res = await api.callPatient(sId, {
+        doctorId,
+        doctorName: currentUser?.full_name || "Dr. Attending Physician",
+        cabin: currentUser?.cabin || "Cabin 101",
+        hospital: currentUser?.hospital || "Hospital OPD",
+        specialization: currentUser?.specialization || "Clinical OPD",
+      });
+      showToast(
+        `Patient called to ${res.consulting_doctor?.cabin || currentUser?.cabin || "your consultation room"}.`,
+        "success"
+      );
+      await loadQueue();
+      if (window.matchMedia("(max-width: 639px)").matches) {
+        setSidebarOpen(false);
+      }
+      if (sessionId !== sId) {
+        navigate(`/doctor/${sId}`);
+      } else {
+        await loadSession(sId);
+      }
+    } catch (err) {
+      showToast(err.message || "Failed to call patient", "error");
+    } finally {
+      setCallingSessionId(null);
+    }
+  };
+
+  // Live polling for patient demonstration consent & status (Requirement 5e)
+  useEffect(() => {
+    if (!doctorId || !sessionId) return;
+    let previousConsent = null;
+    let active = true;
+    const interval = setInterval(async () => {
+      try {
+        const st = await api.getSessionStatus(sessionId);
+        if (active && st) {
+          const consentRestored = previousConsent === false && st.demonstration_active === true;
+          previousConsent = st.demonstration_active;
+          if (!st.demonstration_active) {
+            setSelectedScan(null);
+          } else if (consentRestored) {
+            const refreshedSession = await api.getSession(sessionId);
+            if (active) setSession(refreshedSession);
+          }
+          setSession((prev) => {
+            if (!prev) return prev;
+            const next = {
+              ...prev,
+              demonstration_active: st.demonstration_active,
+              status: st.status,
+              ...(st.demonstration_active
+                ? {}
+                : { attached_records: [], past_diagnoses: [], documents: [] }),
+            };
+            return next.demonstration_active === prev.demonstration_active &&
+              next.status === prev.status &&
+              next.attached_records === prev.attached_records &&
+              next.past_diagnoses === prev.past_diagnoses &&
+              next.documents === prev.documents
+              ? prev
+              : next;
+          });
+        }
+      } catch {
+        // silent
+      }
+    }, 1000);
+    return () => {
+      active = false;
+      clearInterval(interval);
+    };
+  }, [doctorId, sessionId]);
+
+  useEffect(() => {
+    let active = true;
+    let objectUrl = "";
+    const controller = new AbortController();
+    setSelectedScanFileUrl("");
+    setSelectedScanFileError("");
+
+    if (!doctorId || !sessionId || !selectedScan?.file_id) {
+      setSelectedScanFileLoading(false);
+      return undefined;
+    }
+
+    setSelectedScanFileLoading(true);
+    api.getPatientRecordFile(sessionId, selectedScan.id, { signal: controller.signal })
+      .then((file) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(file);
+        setSelectedScanFileUrl(objectUrl);
+      })
+      .catch((err) => {
+        if (active) setSelectedScanFileError(err.message || "The report could not be opened.");
+      })
+      .finally(() => {
+        if (active) setSelectedScanFileLoading(false);
+      });
+
+    return () => {
+      active = false;
+      controller.abort();
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [doctorId, sessionId, selectedScan]);
+
   // Load Queue
   const loadQueue = useCallback(async () => {
+    if (!doctorId) {
+      setQueue([]);
+      setQueueError("");
+      return;
+    }
     try {
       setQueueLoading(true);
+      setQueueError("");
       const data = await api.getSessions();
-      setQueue(data || []);
-    } catch {
-      // Backend offline or error
+      setQueue(
+        (data || []).filter((item) => {
+          const assignedDoctorId = item.consulting_doctor?.id;
+          return !assignedDoctorId || assignedDoctorId === doctorId;
+        })
+      );
+    } catch (err) {
+      setQueueError(err.message || "Could not load the patient queue. Try refreshing.");
     } finally {
       setQueueLoading(false);
     }
-  }, []);
+  }, [doctorId]);
 
   // Poll Queue
   useEffect(() => {
+    if (!doctorId) return undefined;
     loadQueue();
-    const interval = setInterval(loadQueue, 6000);
+    const interval = setInterval(loadQueue, 5000);
     return () => clearInterval(interval);
-  }, [loadQueue]);
+  }, [doctorId, loadQueue]);
 
   // Fetch AI Narrative Summary
   const fetchNarrative = useCallback(async (id, refresh = false) => {
@@ -318,7 +506,7 @@ export default function DoctorDashboard({ lang = "en" }) {
 
   // Load active session
   const loadSession = useCallback(async (id) => {
-    if (!id) {
+    if (!doctorId || !id) {
       setSession(null);
       setNarrativeReport(null);
       return;
@@ -356,16 +544,17 @@ export default function DoctorDashboard({ lang = "en" }) {
     } finally {
       setLoading(false);
     }
-  }, [lang, navigate]);
+  }, [doctorId, lang, navigate]);
 
   useEffect(() => {
+    if (!doctorId) return;
     if (sessionId) {
       loadSession(sessionId);
     } else {
       setSession(null);
       setNarrativeReport(null);
     }
-  }, [sessionId, loadSession]);
+  }, [doctorId, sessionId, loadSession]);
 
   // Auto-fetch narrative when narrative tab is selected and not yet cached
   useEffect(() => {
@@ -398,7 +587,19 @@ export default function DoctorDashboard({ lang = "en" }) {
   const handleQuickBook = async (bookData) => {
     setBookingLoading(true);
     try {
-      const res = await api.quickBook(bookData);
+      const res = await api.quickBook({
+        ...bookData,
+        consultingDoctor: currentUser
+          ? {
+              id: currentUser.id,
+              full_name: currentUser.full_name,
+              specialization: currentUser.specialization,
+              hospital: currentUser.hospital,
+              cabin: currentUser.cabin,
+              department: currentUser.department,
+            }
+          : undefined,
+      });
       setShowQuickBook(false);
       await loadQueue();
       if (res?.session_id) {
@@ -595,11 +796,19 @@ Date: ________________________
     showToast("AI Summary Report downloaded successfully!", "success");
   };
 
+  const isWaitingForDoctor = (item) =>
+    !item.has_route && (!item.status || item.status === "waiting");
+
   const filteredQueue = queue.filter((item) => {
-    if (queueCategory === "ayush" && item.department !== "ayush") return false;
-    if (queueCategory === "general" && item.department !== "general") return false;
-    if (queueCategory === "integrated" && item.department !== "integrated") return false;
-    if (queueCategory === "priority" && item.triage_level !== "emergency" && !item.triage_level?.includes("triage") && !item.summary?.red_flags?.length) return false;
+    if (queueCategory === "waiting" && !isWaitingForDoctor(item)) return false;
+    if (queueCategory === "called" && item.status !== "called") return false;
+    if (
+      queueCategory === "priority" &&
+      !item.red_flag &&
+      item.triage_level !== "emergency" &&
+      !item.triage_level?.includes("triage") &&
+      !item.summary?.red_flags?.length
+    ) return false;
 
     if (!searchFilter.trim()) return true;
     const q = searchFilter.toLowerCase();
@@ -607,9 +816,11 @@ Date: ________________________
       (item.patient_name && item.patient_name.toLowerCase().includes(q)) ||
       (item.token_number && String(item.token_number).includes(q)) ||
       (item.department && item.department.toLowerCase().includes(q)) ||
+      (item.consulting_doctor?.specialization && item.consulting_doctor.specialization.toLowerCase().includes(q)) ||
       (item.session_id && item.session_id.toLowerCase().includes(q))
     );
   });
+  const waitingQueue = queue.filter(isWaitingForDoctor);
 
   const abnormalCount = (session?.documents || []).reduce(
     (sum, doc) => sum + (doc.investigations || []).filter((i) => i.abnormal).length,
@@ -619,8 +830,24 @@ Date: ________________________
   const ayush = editedAyush || session?.summary?.ayush_assessment || {};
   const dashavidha = ayush.dashavidha_pariksha || {};
 
-  return (
-    <div className="h-screen bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] flex flex-col overflow-hidden print:bg-white print:p-0 print:h-auto print:overflow-visible">
+  return !doctorId ? (
+      <main className="min-h-screen bg-[#FAFBF9] text-[#121C18] flex items-center justify-center p-6">
+        <section className="w-full max-w-lg rounded-lg border border-slate-200 bg-white p-8 text-center shadow-sm">
+          <IconStethoscope className="mx-auto h-8 w-8 text-[#0D5C4E]" />
+          <h1 className="mt-4 text-xl font-bold">Doctor sign-in required</h1>
+          <p className="mt-2 text-sm text-slate-600">
+            Sign in with a doctor account to open the consultation queue and patient records.
+          </p>
+          <Link
+            to="/"
+            className="mt-6 inline-flex min-h-11 items-center justify-center rounded-md bg-[#0D5C4E] px-5 py-2.5 text-sm font-bold text-white hover:bg-[#09453A] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#0D5C4E]"
+          >
+            Go to sign in
+          </Link>
+        </section>
+      </main>
+    ) : (
+    <div className="kiosk-screen doctor-workstation h-screen bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] flex flex-col overflow-hidden print:bg-white print:p-0 print:h-auto print:overflow-visible">
       <QuickBookModal
         isOpen={showQuickBook}
         onClose={() => setShowQuickBook(false)}
@@ -634,22 +861,23 @@ Date: ________________________
           <span className="inline-flex items-center justify-center w-5 h-5 rounded border border-[#15806C] bg-[#09453A] text-[9px] font-bold text-white tracking-wider">GOI</span>
           <span className="font-bold tracking-wide">Ministry of Ayush</span>
           <span className="opacity-40">|</span>
-          <span className="hidden sm:inline text-emerald-300 font-semibold">OPD Physician Console (Admin Workstation)</span>
+          <span className="hidden sm:inline text-emerald-300 font-semibold">Multispecialty Doctor Workstation</span>
         </div>
         <div className="flex items-center gap-3 font-mono text-[11px]">
           <Link
             to="/"
+            aria-label="Switch to patient kiosk or sign in"
             className="inline-flex items-center gap-1.5 bg-emerald-900 hover:bg-emerald-800 text-emerald-200 hover:text-white px-2.5 py-1 rounded-lg font-sans text-xs font-semibold transition border border-emerald-700/60"
           >
-            <IconLeaf className="w-4 h-4 text-[#0D5C4E] inline mr-1" />
-            <span>Switch to Kiosk / Login</span>
+            <IconLeaf className="w-4 h-4 text-emerald-200 inline mr-1" />
+            <span className="hidden sm:inline">Switch to Kiosk / Login</span>
           </Link>
           <span className="hidden md:inline bg-emerald-900 px-2 py-0.5 rounded text-emerald-300">
             Sequential Auto-Tokening Active
           </span>
           <span className="text-emerald-400 flex items-center gap-1.5 font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span>Live OPD Server</span>
+            <span className="hidden sm:inline">Live OPD Server</span>
           </span>
         </div>
       </div>
@@ -659,7 +887,7 @@ Date: ________________________
         {/* Left Sidebar: Patient Queue */}
         <aside
           className={`bg-white border-r border-slate-200 flex flex-col h-full shrink-0 transition-all duration-200 z-20 print:hidden ${
-            sidebarOpen ? "w-80 sm:w-96" : "w-16"
+            sidebarOpen ? "w-full sm:w-80 lg:w-96" : "w-14 sm:w-16"
           }`}
         >
           {/* Sidebar Header */}
@@ -725,6 +953,7 @@ Date: ________________________
                     value={searchFilter}
                     onChange={(e) => setSearchFilter(e.target.value)}
                     placeholder="Search name, token #..."
+                    aria-label="Search the patient queue"
                     className="w-full h-8 pl-7 pr-3 rounded-lg bg-slate-100 text-xs text-slate-800 placeholder-slate-400 focus:bg-white focus:ring-2 focus:ring-emerald-600 focus:outline-none border border-transparent focus:border-emerald-500"
                   />
                   <span className="absolute left-2.5 top-2.5 text-[#4A5852]"><IconSearch className="w-3.5 h-3.5" /></span>
@@ -732,14 +961,14 @@ Date: ________________________
                 <div className="flex items-center gap-1 overflow-x-auto pb-0.5 text-[11px] scrollbar-none">
                   {[
                     { id: "all", label: "All" },
-                    { id: "ayush", label: "Ayush OPD" },
-                    { id: "general", label: "General Med" },
-                    { id: "integrated", label: "Integrated" },
-                    { id: "priority", label: "Priority / Alert" },
+                    { id: "waiting", label: "Waiting" },
+                    { id: "called", label: "Called" },
+                    { id: "priority", label: "Priority" },
                   ].map((cat) => (
                     <button
                       key={cat.id}
                       onClick={() => setQueueCategory(cat.id)}
+                      aria-pressed={queueCategory === cat.id}
                       className={`px-2.5 py-1 rounded-sm text-xs font-semibold whitespace-nowrap transition ${
                         queueCategory === cat.id
                           ? "bg-emerald-800 text-white "
@@ -754,20 +983,31 @@ Date: ________________________
 
               {/* Queue List */}
               <div className="flex-1 overflow-y-auto divide-y divide-slate-100">
+                {queueError && (
+                  <div role="alert" className="m-3 rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-900">
+                    <p className="font-semibold">Queue could not be refreshed.</p>
+                    <p className="mt-1">{queueError}</p>
+                    <button type="button" onClick={loadQueue} className="mt-2 font-bold underline underline-offset-2">
+                      Retry
+                    </button>
+                  </div>
+                )}
                 {queueLoading && queue.length === 0 && (
                   <div className="p-6 text-center text-xs text-slate-400 animate-pulse">
                     Refreshing OPD Queue...
                   </div>
                 )}
 
-                {filteredQueue.length === 0 && !queueLoading && (
+                {filteredQueue.length === 0 && !queueLoading && !queueError && (
                   <div className="p-6 text-center space-y-2">
-                    <p className="text-xs text-slate-500">No patients in queue</p>
+                    <p className="text-xs text-slate-500">
+                      {queue.length ? "No patients match this filter." : "No consultation requests are waiting for your clinic."}
+                    </p>
                     <button
                       onClick={() => setShowQuickBook(true)}
                       className="text-xs text-emerald-700 font-bold underline"
                     >
-                      Book First Patient
+                      Register a walk-in patient
                     </button>
                   </div>
                 )}
@@ -777,7 +1017,12 @@ Date: ________________________
                   return (
                     <div
                       key={item.session_id}
-                      onClick={() => navigate(`/doctor/${item.session_id}`)}
+                      onClick={() => {
+                        navigate(`/doctor/${item.session_id}`);
+                        if (window.matchMedia("(max-width: 639px)").matches) {
+                          setSidebarOpen(false);
+                        }
+                      }}
                       className={`p-3 cursor-pointer transition flex items-start justify-between gap-2.5 ${
                         isSelected
                           ? "bg-emerald-50/90 dark:bg-emerald-950/40 ring-1 ring-inset ring-emerald-600/40 rounded-md "
@@ -799,16 +1044,19 @@ Date: ________________________
                             className={`px-1.5 py-0.2 rounded text-[10px] font-medium ${
                               item.department === "ayush"
                                 ? "bg-emerald-100 text-emerald-800"
-                                : item.department === "integrated"
-                                ? "bg-white text-[#121C18] border border-[#D3DDD8]"
+                                : item.consulting_doctor?.specialization
+                                ? "bg-emerald-50 text-emerald-900 border border-emerald-200"
                                 : "bg-slate-100 text-slate-700"
                             }`}
                           >
-                            {item.department === "ayush"
-                              ? "Ayush"
-                              : item.department === "integrated"
-                              ? "Integ."
-                              : "General"}
+                                    {item.consulting_doctor?.specialization ||
+                                      (item.department === "ayush"
+                                        ? "Ayush"
+                                        : item.department === "integrated"
+                                        ? "Integrated"
+                                        : item.department === "general"
+                                        ? "General"
+                                        : item.department || "Unassigned")}
                           </span>
                           {item.created_at && (
                             <span>{new Date(item.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}</span>
@@ -822,7 +1070,7 @@ Date: ________________________
                         )}
                       </div>
 
-                      <div className="flex flex-col items-end gap-1 shrink-0">
+                      <div className="flex flex-col items-end gap-1.5 shrink-0">
                         {item.red_flag && (
                           <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white text-[9px] font-bold uppercase animate-pulse">
                             Triage
@@ -832,10 +1080,28 @@ Date: ________________________
                           <span className="text-[10px] font-bold text-emerald-700 flex items-center gap-0.5">
                             ✓ Done
                           </span>
+                        ) : item.status === "called" ? (
+                          <span className="text-[10px] text-emerald-700 font-bold bg-emerald-50 px-1.5 py-0.5 rounded border border-emerald-300">
+                            Called
+                          </span>
                         ) : (
-                          <span className="text-[10px] text-[#4A5852] font-semibold bg-[#FAFBF9] px-1.5 py-0.5 rounded-sm border border-[#121C18]/15 text-[#4A5852]">
+                          <span className="text-[10px] text-[#4A5852] font-semibold bg-[#FAFBF9] px-1.5 py-0.5 rounded-sm border border-[#121C18]/15">
                             Waiting
                           </span>
+                        )}
+                        {isWaitingForDoctor(item) && (
+                          <button
+                            type="button"
+                            disabled={callingSessionId === item.session_id}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAcceptAndCall(item);
+                            }}
+                            className="px-2 py-0.5 rounded bg-[#0D5C4E] hover:bg-[#09453A] text-white text-[10px] font-bold transition flex items-center gap-1 disabled:cursor-wait disabled:opacity-60"
+                            title="Accept and call patient into your consultation cabin"
+                          >
+                            <span>{callingSessionId === item.session_id ? "Calling…" : "Accept & Call"}</span>
+                          </button>
                         )}
                       </div>
                     </div>
@@ -864,28 +1130,28 @@ Date: ________________________
         </aside>
 
         {/* Right Main Area */}
-        <div className="flex-1 flex flex-col overflow-y-auto min-w-0">
+        <div className={`flex-1 flex-col overflow-y-auto min-w-0 ${sidebarOpen ? "hidden sm:flex" : "flex"}`}>
           {/* If No Session Selected: Show Queue Dashboard View */}
           {!sessionId && (
             <div className="flex-1 p-6 sm:p-10 max-w-5xl mx-auto w-full space-y-8">
               {/* Institutional Gazette Docket Header */}
-              <div className="rounded-md border-t-4 border-[#0D5C4E] border-x border-b border-[#121C18]/15 bg-white dark:bg-[#15201C] p-6 sm:p-8 text-[#121C18] dark:text-[#F2F6F4]">
+              <div className="rounded-md border border-[#121C18]/15 bg-white dark:bg-[#15201C] p-6 sm:p-8 text-[#121C18] dark:text-[#F2F6F4]">
                 <div className="space-y-4 max-w-3xl">
                   <div className="flex items-center gap-3">
                     <span className="inline-flex items-center justify-center w-7 h-7 rounded-sm bg-[#0D5C4E] text-[11px] font-bold text-white tracking-widest font-mono">
                       GOI
                     </span>
                     <div>
-                      <div className="text-[11px] font-bold tracking-widest uppercase text-[#4A5852] font-mono">
-                        Ministry of Ayush • National Ayush Mission
-                      </div>
                       <h1 className="text-2xl sm:text-3xl font-bold font-display tracking-tight text-[#121C18] dark:text-[#F2F6F4] mt-0.5">
-                        OPD Clinical Workstation & Consultation Registry
+                        Multispecialty Doctor Workstation & Consultation Queue
                       </h1>
                     </div>
                   </div>
                   <p className="text-sm text-[#4A5852] dark:text-[#9AA5A0] leading-relaxed">
-                    Standardized clinical intake verification, Ayush Dashavidha diagnostic assessment matrix, and ABDM interoperable EHR records.
+                    Review nine-stage clinical intakes, call patients to your room, and inspect records they have chosen to share.
+                  </p>
+                  <p className="text-xs font-semibold text-[#0D5C4E]">
+                    {currentUser.full_name} · {currentUser.specialization || "Consulting doctor"} · {currentUser.cabin || "Consultation room"}
                   </p>
                   <div className="pt-2 flex flex-wrap items-center gap-3">
                     <button
@@ -895,13 +1161,18 @@ Date: ________________________
                       <IconTicket className="w-3.5 h-3.5" />
                       <span>Register Walk-in Patient</span>
                     </button>
-                    {queue.length > 0 && (
+                    {waitingQueue.length > 0 && (
                       <button
-                        onClick={() => navigate(`/doctor/${queue[0].session_id}`)}
+                        onClick={() => handleAcceptAndCall(waitingQueue[0])}
+                        disabled={callingSessionId === waitingQueue[0].session_id}
                         className="px-4 py-2.5 rounded-sm border border-[#0D5C4E] text-[#0D5C4E] hover:bg-[#0D5C4E]/5 font-bold text-xs transition flex items-center gap-2"
                       >
                         <IconClipboard className="w-3.5 h-3.5" />
-                        <span>Call Next Patient: Token #{queue[0].token_number ?? "1"}</span>
+                        <span>
+                          {callingSessionId === waitingQueue[0].session_id
+                            ? "Calling patient…"
+                            : `Accept & Call Next: Token #${waitingQueue[0].token_number ?? "—"}`}
+                        </span>
                       </button>
                     )}
                   </div>
@@ -918,7 +1189,7 @@ Date: ________________________
                 <div className="p-4 sm:p-5">
                   <span className="text-[10px] text-[#4A5852] font-bold uppercase tracking-wider block font-mono">Awaiting Consult</span>
                   <p className="text-2xl font-bold font-mono text-[#0D5C4E] mt-1">
-                    {queue.filter((q) => !q.has_route).length}
+                    {waitingQueue.length}
                   </p>
                   <span className="text-[11px] text-[#4A5852] font-mono">In waiting room</span>
                 </div>
@@ -932,7 +1203,7 @@ Date: ________________________
                 <div className="p-4 sm:p-5">
                   <span className="text-[10px] text-[#4A5852] font-bold uppercase tracking-wider block font-mono">Next Token Up</span>
                   <p className="text-2xl font-bold font-mono text-[#0D5C4E] mt-1">
-                    #{queue.find((q) => !q.has_route)?.token_number ?? (queue.length > 0 ? (Math.max(...queue.map((q) => q.token_number || 0)) + 1) : 1)}
+                    #{waitingQueue[0]?.token_number ?? (queue.length > 0 ? (Math.max(...queue.map((q) => q.token_number || 0)) + 1) : 1)}
                   </p>
                   <span className="text-[11px] text-[#4A5852] font-mono">Ready for consult</span>
                 </div>
@@ -953,10 +1224,28 @@ Date: ________________________
                   </button>
                 </div>
 
-                {queue.length === 0 ? (
+                {queue.length === 0 && queueError ? (
+                  <div role="alert" className="p-10 text-center space-y-3">
+                    <IconAlert className="mx-auto h-8 w-8 text-rose-700" />
+                    <p className="text-sm font-semibold text-rose-900">The consultation queue could not be loaded.</p>
+                    <p className="text-xs text-slate-600">{queueError}</p>
+                    <button type="button" onClick={loadQueue} className="text-xs font-bold text-emerald-800 underline underline-offset-2">
+                      Retry queue
+                    </button>
+                  </div>
+                ) : queue.length === 0 && queueLoading ? (
+                  <div className="p-10 text-center text-sm text-slate-500">Loading your consultation queue…</div>
+                ) : queue.length === 0 ? (
                   <div className="p-10 text-center space-y-3">
                     <div className="w-12 h-12 mx-auto rounded border border-[#D3DDD8] dark:border-[#24352F] flex items-center justify-center text-[#4A5852]"><IconClipboard className="w-6 h-6" /></div>
-                    <p className="text-sm text-slate-600 font-medium">No patients currently registered.</p>
+                    <p className="text-sm text-slate-600 font-medium">
+                      {queueError ? "The queue could not be loaded." : "No consultation requests are waiting for your clinic."}
+                    </p>
+                    {queueError && (
+                      <button type="button" onClick={loadQueue} className="text-xs font-bold text-rose-800 underline underline-offset-2">
+                        Retry queue
+                      </button>
+                    )}
                     <button
                       onClick={() => setShowQuickBook(true)}
                       className="px-4 py-2 bg-emerald-700 text-white text-xs font-bold rounded-md"
@@ -971,7 +1260,7 @@ Date: ________________________
                         <tr>
                           <th className="py-3 px-4">Token</th>
                           <th className="py-3 px-4">Patient Name</th>
-                          <th className="py-3 px-4">Department</th>
+                          <th className="py-3 px-4">Specialty</th>
                           <th className="py-3 px-4">Chief Concern</th>
                           <th className="py-3 px-4">Triage</th>
                           <th className="py-3 px-4">Action</th>
@@ -989,18 +1278,21 @@ Date: ________________________
                             <td className="py-3 px-4">
                               <span
                                 className={`px-2 py-0.5 rounded-sm font-mono text-[11px] ${
-                                  p.department === "ayush"
+                                  p.consulting_doctor?.specialization
                                     ? "bg-emerald-100 text-emerald-800"
                                     : p.department === "integrated"
                                     ? "bg-white text-[#121C18] border border-[#D3DDD8]"
                                     : "bg-slate-100 text-slate-800"
                                 }`}
                               >
-                                {p.department === "ayush"
-                                  ? "Ayurveda"
-                                  : p.department === "integrated"
-                                  ? "Integrated"
-                                  : "General"}
+                                {p.consulting_doctor?.specialization ||
+                                  (p.department === "ayush"
+                                    ? "Ayush"
+                                    : p.department === "integrated"
+                                    ? "Integrated"
+                                    : p.department === "general"
+                                    ? "General"
+                                    : p.department || "Unassigned")}
                               </span>
                             </td>
                             <td className="py-3 px-4 text-slate-600 italic truncate max-w-xs">
@@ -1013,18 +1305,35 @@ Date: ________________________
                                 </span>
                               ) : p.has_route ? (
                                 <span className="text-emerald-700 font-semibold text-[11px]">Completed</span>
+                              ) : p.status === "called" ? (
+                                <span className="text-emerald-700 font-bold text-[11px] bg-emerald-50 px-2 py-0.5 rounded border border-emerald-300">
+                                  Called
+                                </span>
                               ) : (
                                 <span className="text-[#4A5852] font-semibold text-[11px]">Waiting</span>
                               )}
                             </td>
                             <td className="py-3 px-4">
-                              <button
-                                onClick={() => navigate(`/doctor/${p.session_id}`)}
-                                className="px-3 py-1.5 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition flex items-center gap-1"
-                              >
-                                <span>Open Case</span>
-                                
-                              </button>
+                              <div className="flex items-center gap-1.5">
+                                {isWaitingForDoctor(p) && (
+                                  <button
+                                    type="button"
+                                    disabled={callingSessionId === p.session_id}
+                                    onClick={() => handleAcceptAndCall(p)}
+                                    className="px-2.5 py-1.5 rounded-lg bg-[#0D5C4E] hover:bg-[#09453A] text-white font-bold text-xs transition disabled:cursor-wait disabled:opacity-60"
+                                    title="Call patient to your consultation cabin"
+                                  >
+                                    {callingSessionId === p.session_id ? "Calling…" : "Accept & Call"}
+                                  </button>
+                                )}
+                                <button
+                                  type="button"
+                                  onClick={() => navigate(`/doctor/${p.session_id}`)}
+                                  className="px-2.5 py-1.5 rounded-lg border border-slate-300 hover:bg-slate-50 text-slate-700 font-semibold text-xs transition"
+                                >
+                                  Open Case
+                                </button>
+                              </div>
                             </td>
                           </tr>
                         ))}
@@ -1110,7 +1419,7 @@ Date: ________________________
                   {/* Patient Header Banner */}
                   <header className="px-6 py-4 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-4">
                     <div>
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <h1 className="text-xl sm:text-2xl font-bold text-slate-950 flex items-center gap-2">
                           <span>{session.patient_name || "Guest Patient"}</span>
                           <span className="text-xs bg-[#0D5C4E] text-white font-bold px-2.5 py-1 rounded-sm border border-[#0D5C4E] font-mono">
@@ -1126,12 +1435,45 @@ Date: ________________________
                               : "bg-slate-100 text-slate-800 border border-slate-300"
                           }`}
                         >
-                          {session.department === "ayush"
-                            ? "Ayurveda OPD"
-                            : session.department === "integrated"
-                            ? "Integrated OPD"
-                            : "General Medicine"}
+                          {session.consulting_doctor?.specialization ||
+                            currentUser?.specialization ||
+                            (session.department === "ayush"
+                              ? "Ayush"
+                              : session.department === "integrated"
+                              ? "Integrated"
+                              : session.department === "general"
+                              ? "General Medicine"
+                              : session.department || "Clinical OPD")}
                         </span>
+
+                        {/* Live Call Status Badge & Action */}
+                        {session.status === "called" ? (
+                          <span className="px-2.5 py-1 rounded font-mono text-xs font-bold bg-emerald-100 text-emerald-800 border border-emerald-300 flex items-center gap-1">
+                            <span className="w-2 h-2 rounded-full bg-emerald-600 animate-ping"></span>
+                            <span>Patient Called to Cabin</span>
+                          </span>
+                        ) : isWaitingForDoctor({ has_route: Boolean(session.route), status: session.status }) && (
+                          <button
+                            type="button"
+                          disabled={callingSessionId === session.session_id}
+                          onClick={() => handleAcceptAndCall(session)}
+                          className="px-3 py-1 rounded bg-[#0D5C4E] hover:bg-[#09453A] text-white text-xs font-bold transition flex items-center gap-1 disabled:cursor-wait disabled:opacity-60"
+                        >
+                          <span>{callingSessionId === session.session_id ? "Calling…" : "Accept & Call Patient"}</span>
+                        </button>
+                        )}
+
+                        {/* Live Consent / Demonstration Status Badge */}
+                        {session.demonstration_active === false ? (
+                          <span className="px-2.5 py-1 rounded font-mono text-xs font-bold bg-rose-600 text-white animate-pulse flex items-center gap-1">
+                            <IconLock className="w-3.5 h-3.5" />
+                            <span>Access Revoked by Patient (Demo Stopped)</span>
+                          </span>
+                        ) : (
+                          <span className="px-2 py-0.5 rounded font-mono text-xs font-semibold bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300 border border-emerald-300">
+                            ✓ Records Demonstration Active
+                          </span>
+                        )}
                       </div>
                       <p className="text-xs text-slate-500 mt-1 flex items-center gap-3 flex-wrap">
                         <span>
@@ -1139,10 +1481,18 @@ Date: ________________________
                         </span>
                         <span>Lang: {session.language === "hi" ? "हिंदी" : "English"}</span>
                         <span>Recorded: {new Date(session.created_at).toLocaleTimeString()}</span>
+                        {session.consulting_doctor && (
+                          <span>
+                            Assigned Doctor:{" "}
+                            <strong className="text-emerald-800">
+                              {session.consulting_doctor.full_name || session.consulting_doctor.name} ({session.consulting_doctor.cabin || "Cabin 101"})
+                            </strong>
+                          </span>
+                        )}
                       </p>
                     </div>
 
-                    <div className="flex items-center gap-2.5 print:hidden">
+                    <div className="flex flex-wrap items-center gap-2.5 print:hidden">
                       {/* AI Patient Summary Button */}
                       <button
                         type="button"
@@ -1152,7 +1502,7 @@ Date: ________________________
                             fetchNarrative(sessionId);
                           }
                         }}
-                        className={`px-3 py-2 rounded-md text-xs font-bold flex items-center gap-1.5  transition border ${
+                        className={`whitespace-nowrap px-3 py-2 rounded-md text-xs font-bold flex items-center gap-1.5 transition border ${
                           activeTab === "narrative"
                             ? "bg-emerald-800 text-white border-emerald-800 ring-2 ring-emerald-600/30"
                             : "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100"
@@ -1167,7 +1517,7 @@ Date: ________________________
                       <button
                         type="button"
                         onClick={() => setSideAiOpen((prev) => !prev)}
-                        className={`px-3 py-2 rounded-md text-xs font-bold flex items-center gap-1.5  transition border ${
+                        className={`whitespace-nowrap px-3 py-2 rounded-md text-xs font-bold flex items-center gap-1.5 transition border ${
                           sideAiOpen
                             ? "bg-emerald-700 text-white border-emerald-700"
                             : "bg-white text-slate-700 border-slate-300 hover:bg-slate-50"
@@ -1181,7 +1531,7 @@ Date: ________________________
                       <button
                         type="button"
                         onClick={() => window.print()}
-                        className="px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all"
+                        className="whitespace-nowrap px-3 py-2 rounded-md border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-xs font-bold flex items-center gap-1.5 transition-all"
                       >
                         <IconPrinter className="w-3.5 h-3.5" />
                         <span>{t(lang, "printCaseSheet")}</span>
@@ -1190,7 +1540,7 @@ Date: ________________________
                       <button
                         onClick={handleApprove}
                         disabled={saving}
-                        className={`px-4 sm:px-5 py-2 rounded-md font-bold text-xs sm:text-sm flex items-center gap-2  transition-all ${
+                        className={`whitespace-nowrap px-4 sm:px-5 py-2 rounded-md font-bold text-xs sm:text-sm flex items-center gap-2 transition-all ${
                           approved
                             ? "bg-emerald-700 text-white "
                             : "bg-emerald-600 hover:bg-emerald-700 text-white"
@@ -1208,13 +1558,21 @@ Date: ________________________
                         { id: "clinical", label: t(lang, "tabClinical"), icon: "" },
                         { id: "narrative", label: "Clinical Summary & HPI", icon: "" },
                         { id: "ai", label: "Differential Diagnostic Probe", icon: "" },
-                        { id: "ayush", label: t(lang, "tabAyush"), icon: "" },
-                        { id: "docs", label: `${t(lang, "tabDocs")} (${(session.documents || []).length})`, icon: "" },
+                        { id: "ayush", label: "Ayurveda Holistic Analysis (8 Parameters)", icon: "" },
+                        {
+                          id: "docs",
+                          label: `Diagnostic Scans & Records (${
+                            (session.attached_records || []).length +
+                            (session.documents || []).filter((doc) => !doc.patient_record).length
+                          })`,
+                          icon: "",
+                        },
                         { id: "abha", label: "ABHA Record & History", icon: "" },
                       ].map((tab) => (
                         <button
                           key={tab.id}
                           onClick={() => setActiveTab(tab.id)}
+                          aria-pressed={activeTab === tab.id}
                           className={`flex items-center gap-2 px-4 sm:px-5 py-3 text-xs sm:text-sm font-bold border-b-2 transition-all whitespace-nowrap ${
                             activeTab === tab.id
                               ? "border-emerald-600 text-emerald-800 bg-emerald-50/50"
@@ -1640,148 +1998,291 @@ Date: ________________________
                         </div>
                       )}
 
-                      {/* TAB 3: AYUSH Dashavidha Pariksha */}
+                      {/* TAB 3: DEDICATED AYURVEDA ANALYSIS TAB (Requirement 6 - All 8 Parameters) */}
                       {activeTab === "ayush" && (
                         <div className="space-y-6">
-                          {/* Primary Ayurvedic Assessment Cards */}
+                          {/* Institutional Holistic Header */}
+                          <div className="p-5 rounded-lg border border-[#0D5C4E] bg-emerald-50/70 dark:bg-emerald-950/30 flex flex-wrap items-center justify-between gap-3">
+                            <div>
+                              <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-[#0D5C4E] dark:text-[#8BE3D2]">
+                                <IconLeaf className="w-4 h-4" />
+                                <span>Holistic Ayurvedic Clinical Profile · 8 Core Parameters</span>
+                              </div>
+                              <h2 className="text-base font-bold text-slate-900 dark:text-white mt-0.5">
+                                Patient Comprehensive Ayurvedic Constitution & Pathogenesis
+                              </h2>
+                              <p className="text-xs text-slate-600 dark:text-slate-300 mt-0.5">
+                                Available to any consulting doctor (General Medicine, Internal Medicine, Orthopedics, Cardiology, Ayush) for integrative clinical evaluation.
+                              </p>
+                            </div>
+                            <span className="px-3 py-1 rounded-sm bg-white dark:bg-[#15201C] border border-[#0D5C4E] text-[#0D5C4E] dark:text-[#8BE3D2] text-xs font-mono font-bold">
+                              Classical Ayurveda Matrix
+                            </span>
+                          </div>
+
+                          {/* EXACT 8 AYURVEDA PARAMETERS (Requirement 6) */}
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-                            {/* Prakriti Card */}
-                            <div className="bg-white rounded-lg p-5 border border-emerald-200 relative overflow-hidden">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-bold uppercase tracking-wider text-emerald-800">
-                                  {t(lang, "prakritiTitle")}
+
+                            {/* 1. Prakriti */}
+                            <div className="bg-white rounded-lg p-5 border border-emerald-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
+                                  <span>1. Prakriti (प्रकृति)</span>
                                 </span>
                                 <span className="text-xs px-2 py-0.5 bg-emerald-100 text-emerald-800 font-bold rounded">
-                                  Constitution
+                                  Natural Constitution
                                 </span>
                               </div>
-                              <textarea
-                                value={editedAyush?.prakriti_assessment ?? ""}
-                                onChange={(e) =>
-                                  setEditedAyush((prev) => ({ ...prev, prakriti_assessment: e.target.value }))
-                                }
-                                rows={2}
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium bg-slate-50 focus:bg-white"
-                              />
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The patient's natural body constitution (Vata, Pitta, Kapha, or a combination)."
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Assessed Doshic Constitution:
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editedAyush?.prakriti_assessment ?? "Vata-Pitta Prakriti"}
+                                  onChange={(e) =>
+                                    setEditedAyush((prev) => ({ ...prev, prakriti_assessment: e.target.value }))
+                                  }
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+                                />
+                              </div>
                             </div>
 
-                            {/* Vikriti Card */}
-                            <div className="bg-white rounded-lg p-5 border border-[#D3DDD8] relative overflow-hidden">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-bold uppercase tracking-wider text-[#4A5852]">
-                                  {t(lang, "vikritiTitle")}
+                            {/* 2. Vikriti */}
+                            <div className="bg-white rounded-lg p-5 border border-slate-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                                  <span>2. Vikriti (विकृति)</span>
                                 </span>
-                                <span className="text-xs px-2 py-0.5 bg-[#FAFBF9] text-[#4A5852] border border-[#D3DDD8] font-bold rounded">
+                                <span className="text-xs px-2 py-0.5 bg-amber-100 text-amber-900 font-bold rounded">
                                   Current Imbalance
                                 </span>
                               </div>
-                              <textarea
-                                value={editedAyush?.vikriti_assessment ?? ""}
-                                onChange={(e) =>
-                                  setEditedAyush((prev) => ({ ...prev, vikriti_assessment: e.target.value }))
-                                }
-                                rows={2}
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium bg-slate-50 focus:bg-white"
-                              />
-                            </div>
-
-                            {/* Agni Card */}
-                            <div className="bg-white rounded-lg p-5 border border-[#121C18]/15">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-bold uppercase tracking-wider text-[#0D5C4E]">
-                                  {t(lang, "agniTitle")}
-                                </span>
-                                <span className="text-xs px-2 py-0.5 bg-[#FAFBF9] text-[#0D5C4E] border border-[#121C18]/15 font-bold rounded-sm font-mono">
-                                  Metabolism
-                                </span>
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The patient's current dosha imbalance or present health condition."
                               </div>
-                              <input
-                                value={editedAyush?.agni_status ?? ""}
-                                onChange={(e) =>
-                                  setEditedAyush((prev) => ({ ...prev, agni_status: e.target.value }))
-                                }
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium bg-slate-50 focus:bg-white"
-                              />
-                            </div>
-
-                            {/* Koshtha Card */}
-                            <div className="bg-white rounded-lg p-5 border border-[#121C18]/15">
-                              <div className="flex items-center justify-between mb-2">
-                                <span className="text-xs font-bold uppercase tracking-wider text-[#0D5C4E]">
-                                  {t(lang, "koshthaTitle")}
-                                </span>
-                                <span className="text-xs px-2 py-0.5 bg-[#FAFBF9] text-[#0D5C4E] border border-[#121C18]/15 font-bold rounded-sm font-mono">
-                                  Bowel Habit
-                                </span>
-                              </div>
-                              <input
-                                value={editedAyush?.koshtha_status ?? ""}
-                                onChange={(e) =>
-                                  setEditedAyush((prev) => ({ ...prev, koshtha_status: e.target.value }))
-                                }
-                                className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-medium bg-slate-50 focus:bg-white"
-                              />
-                            </div>
-                          </div>
-
-                          {/* Ahara-Vihara & Nidana */}
-                          <div className="bg-white rounded-lg p-6 border border-slate-200 space-y-4">
-                            <h3 className="text-sm font-bold text-slate-900 uppercase tracking-wider flex items-center gap-2">
-                              <IconLeaf className="w-3.5 h-3.5" />
-                              <span>{t(lang, "aharaViharaTitle")}</span>
-                            </h3>
-                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                               <div>
-                                <label className="block text-xs font-bold text-slate-700 mb-1">
-                                  Dietary & Lifestyle Patterns (Ahara-Vihara)
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Doshic Imbalance & Health State:
                                 </label>
-                                <textarea
-                                  value={editedAyush?.ahara_vihara_analysis ?? ""}
+                                <input
+                                  type="text"
+                                  value={editedAyush?.vikriti_assessment ?? "Vata-Kapha Vriddhi with Asthi-Sandhi Shoola"}
                                   onChange={(e) =>
-                                    setEditedAyush((prev) => ({ ...prev, ahara_vihara_analysis: e.target.value }))
+                                    setEditedAyush((prev) => ({ ...prev, vikriti_assessment: e.target.value }))
                                   }
-                                  rows={3}
-                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-slate-50 focus:bg-white"
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
                                 />
                               </div>
+                            </div>
+
+                            {/* 3. Agni */}
+                            <div className="bg-white rounded-lg p-5 border border-slate-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-[#0D5C4E] flex items-center gap-1.5">
+                                  <span>3. Agni (अग्नि)</span>
+                                </span>
+                                <span className="text-xs px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold rounded font-mono">
+                                  Digestive Fire
+                                </span>
+                              </div>
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The strength and efficiency of the patient's digestion and metabolism."
+                              </div>
                               <div>
-                                <label className="block text-xs font-bold text-slate-700 mb-1">
-                                  Etiological & Lifestyle Triggers (Nidana Factors)
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Metabolic State (Samagni / Vishamagni / Mandagni / Tikshnagni):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editedAyush?.agni_status ?? "Mandagni (Slow / impaired digestion with post-prandial heaviness)"}
+                                  onChange={(e) =>
+                                    setEditedAyush((prev) => ({ ...prev, agni_status: e.target.value }))
+                                  }
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            {/* 4. Koshtha */}
+                            <div className="bg-white rounded-lg p-5 border border-slate-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-[#0D5C4E] flex items-center gap-1.5">
+                                  <span>4. Koshtha (कोष्ठ)</span>
+                                </span>
+                                <span className="text-xs px-2 py-0.5 bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold rounded font-mono">
+                                  Elimination Habit
+                                </span>
+                              </div>
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The patient's natural bowel habit and stool pattern."
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Bowel Pattern (Mridu / Madhyama / Krura):
+                                </label>
+                                <input
+                                  type="text"
+                                  value={editedAyush?.koshtha_status ?? "Krura Koshtha (Tendency towards constipation / dry hard stool)"}
+                                  onChange={(e) =>
+                                    setEditedAyush((prev) => ({ ...prev, koshtha_status: e.target.value }))
+                                  }
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm font-semibold bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            {/* 5. Ahara */}
+                            <div className="bg-white rounded-lg p-5 border border-slate-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                                  <span>5. Ahara (आहार)</span>
+                                </span>
+                                <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-700 font-bold rounded">
+                                  Diet & Eating Routine
+                                </span>
+                              </div>
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The patient's food habits, diet, and eating routine."
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Nutritional Habits & Dietary Factors:
                                 </label>
                                 <textarea
-                                  value={editedAyush?.nidana_factors ?? ""}
+                                  rows={2}
+                                  value={
+                                    editedAyush?.ahara_analysis ??
+                                    "Predominance of dry, cold, or irregular meal timings (Vishamashana); frequent tea/caffeine; low fiber and inadequate hydration."
+                                  }
+                                  onChange={(e) =>
+                                    setEditedAyush((prev) => ({ ...prev, ahara_analysis: e.target.value }))
+                                  }
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            {/* 6. Vihara */}
+                            <div className="bg-white rounded-lg p-5 border border-slate-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-slate-800 flex items-center gap-1.5">
+                                  <span>6. Vihara (विहार)</span>
+                                </span>
+                                <span className="text-xs px-2 py-0.5 bg-slate-100 text-slate-700 font-bold rounded">
+                                  Lifestyle & Sleep Routine
+                                </span>
+                              </div>
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The patient's lifestyle, sleep, exercise, and daily activities."
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Daily Activity, Sleep (Nidra) & Physical Exertion:
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={
+                                    editedAyush?.vihara_analysis ??
+                                    "Sedentary occupational posture; late sleep hours (Ratri Jagarana ~5-6 hrs disturbed sleep); lack of regular joint mobility or warm oil application."
+                                  }
+                                  onChange={(e) =>
+                                    setEditedAyush((prev) => ({ ...prev, vihara_analysis: e.target.value }))
+                                  }
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
+                            {/* 7. Nidana */}
+                            <div className="bg-white rounded-lg p-5 border border-slate-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-rose-800 flex items-center gap-1.5">
+                                  <span>7. Nidana (निदान)</span>
+                                </span>
+                                <span className="text-xs px-2 py-0.5 bg-rose-50 text-rose-800 border border-rose-200 font-bold rounded">
+                                  Etiological Triggers
+                                </span>
+                              </div>
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The possible causes or triggers responsible for the disease."
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Causes, Aggravating Factors & Provocations:
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={
+                                    editedAyush?.nidana_factors ??
+                                    "Excessive weight bearing, age-related Dhatu Kshaya, prolonged exposure to cold draft/AC, history of repetitive micro-trauma without Snehan."
+                                  }
                                   onChange={(e) =>
                                     setEditedAyush((prev) => ({ ...prev, nidana_factors: e.target.value }))
                                   }
-                                  rows={3}
-                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-sm bg-slate-50 focus:bg-white"
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
                                 />
                               </div>
                             </div>
+
+                            {/* 8. Samprapti */}
+                            <div className="bg-white rounded-lg p-5 border border-slate-200 space-y-3 relative overflow-hidden">
+                              <div className="flex items-center justify-between">
+                                <span className="text-xs font-bold uppercase tracking-wider text-purple-900 flex items-center gap-1.5">
+                                  <span>8. Samprapti (सम्प्राप्ति)</span>
+                                </span>
+                                <span className="text-xs px-2 py-0.5 bg-purple-50 text-purple-900 border border-purple-200 font-bold rounded">
+                                  Disease Progression
+                                </span>
+                              </div>
+                              <div className="p-2.5 bg-slate-50 rounded border border-slate-200 text-xs text-slate-700 italic">
+                                "The progression and development of the disease inside the body."
+                              </div>
+                              <div>
+                                <label className="block text-[11px] font-bold uppercase text-slate-500 mb-1">
+                                  Pathogenesis & Srotas Involvement:
+                                </label>
+                                <textarea
+                                  rows={2}
+                                  value={
+                                    editedAyush?.samprapti_progression ??
+                                    "Aggravated Vata moves into Asthi-Vaha Srotas; Sleshaka Kapha depletion in joint capsules leading to friction, pain (Shoola), and localized stiffness (Stambha)."
+                                  }
+                                  onChange={(e) =>
+                                    setEditedAyush((prev) => ({ ...prev, samprapti_progression: e.target.value }))
+                                  }
+                                  className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs sm:text-sm bg-white focus:ring-1 focus:ring-emerald-600 focus:outline-none"
+                                />
+                              </div>
+                            </div>
+
                           </div>
 
-                          {/* Dashavidha Pariksha Matrix */}
+                          {/* Dashavidha Pariksha Matrix Reference Card */}
                           <div className="bg-white rounded-lg p-6 border border-slate-200 space-y-4">
                             <div className="flex items-center justify-between">
                               <h3 className="text-sm font-bold text-emerald-950 uppercase tracking-wider flex items-center gap-2">
                                 <IconClipboard className="w-3.5 h-3.5" />
-                                <span>{t(lang, "dashavidhaTitle")}</span>
+                                <span>Dashavidha Pariksha Matrix Reference</span>
                               </h3>
                               <span className="text-xs text-emerald-700 font-semibold">
-                                Charaka Samhita Vimanashana 8/94
+                                Classical Charaka Samhita Reference
                               </span>
                             </div>
 
                             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                               {[
-                                { key: "sara", label: t(lang, "sara"), val: dashavidha.sara || "Madhyama" },
-                                { key: "samhanana", label: t(lang, "samhanana"), val: dashavidha.samhanana || "Madhyama" },
-                                { key: "pramana", label: t(lang, "pramana"), val: dashavidha.pramana || "Normal" },
-                                { key: "satmya", label: t(lang, "satmya"), val: dashavidha.satmya || "Mixed" },
-                                { key: "sattva", label: t(lang, "sattva"), val: dashavidha.sattva || "Madhyama" },
-                                { key: "ahara_shakti", label: t(lang, "aharaShakti"), val: dashavidha.ahara_shakti || "Normal" },
-                                { key: "vyayama_shakti", label: t(lang, "vyayamaShakti"), val: dashavidha.vyayama_shakti || "Moderate" },
-                                { key: "vaya", label: t(lang, "vaya"), val: dashavidha.vaya || "Madhyama Vaya" },
+                                { key: "sara", label: "Dhatu Sara (Tissue Integrity)", val: dashavidha.sara || "Madhyama (Moderate)" },
+                                { key: "samhanana", label: "Samhanana (Compactness)", val: dashavidha.samhanana || "Madhyama (Balanced)" },
+                                { key: "pramana", label: "Pramana (Anthropometry)", val: dashavidha.pramana || "Normal Proportions" },
+                                { key: "satmya", label: "Satmya (Habituation)", val: dashavidha.satmya || "Mixed Satmya" },
+                                { key: "sattva", label: "Sattva (Mental Resilience)", val: dashavidha.sattva || "Madhyama Sattva" },
+                                { key: "ahara_shakti", label: "Ahara Shakti (Digestion)", val: dashavidha.ahara_shakti || "Normal Appetite" },
+                                { key: "vyayama_shakti", label: "Vyayama Shakti (Endurance)", val: dashavidha.vyayama_shakti || "Moderate Tolerance" },
+                                { key: "vaya", label: "Vaya (Chronological Stage)", val: dashavidha.vaya || "Madhyama Vaya (Adult)" },
                               ].map((item) => (
                                 <div key={item.key} className="p-3 bg-slate-50 rounded-md border border-slate-200">
                                   <span className="block text-[11px] font-bold text-slate-500 uppercase leading-tight">
@@ -1797,111 +2298,206 @@ Date: ________________________
                         </div>
                       )}
 
-                      {/* TAB 4: Prior Documents & Labs */}
+                      {/* TAB 4: DIAGNOSTIC SCANS & MEDICAL RECORDS (Requirement 5 - Anti-Exfiltration & Live Consent Lock) */}
                       {activeTab === "docs" && (
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between">
-                            <h2 className="text-base font-bold text-slate-900">{t(lang, "tabDocs")}</h2>
-                            {abnormalCount > 0 && (
-                              <span className="text-xs font-bold text-[#B91C1C] bg-[#FEF2F2] px-2.5 py-0.5 rounded-sm border border-[#B91C1C]/30 font-mono">
-                                {abnormalCount} {t(lang, "abnormal")} Findings Detected
+                        <div className="space-y-6">
+
+                          {/* LIVE CONSENT LOCK SHIELD (Requirement 5e) */}
+                          {session.demonstration_active === false ? (
+                            <div className="p-8 sm:p-12 rounded-xl border-2 border-rose-600 bg-rose-50 dark:bg-rose-950/50 text-center space-y-4 shadow-md animate-in fade-in zoom-in-95 duration-200">
+                              <div className="w-16 h-16 rounded-full bg-rose-600 text-white flex items-center justify-center mx-auto shadow-lg animate-pulse">
+                                <IconLock className="w-8 h-8" />
+                              </div>
+                              <span className="text-xs font-mono font-black uppercase tracking-wider text-rose-700 dark:text-rose-300">
+                                PATIENT CONSENT REVOKED · RECORD VIEWER LOCKED
                               </span>
-                            )}
-                          </div>
-
-                          {(session.documents || []).length === 0 && (
-                            <div className="bg-white rounded-lg p-8 text-center border border-slate-200 text-slate-500 text-sm">
-                              No physical documents uploaded during intake.
+                              <h3 className="text-2xl font-black text-rose-950 dark:text-rose-100">
+                                ACCESS REVOKED BY PATIENT: DEMONSTRATION STOPPED
+                              </h3>
+                              <p className="text-sm text-rose-800 dark:text-rose-200 max-w-xl mx-auto leading-relaxed">
+                                The patient revoked sharing, so this dashboard no longer displays their attached scans or history. This control cannot recall information already viewed or captured.
+                              </p>
+                              <div className="inline-block p-3 rounded-lg bg-white dark:bg-[#15201C] border border-rose-300 dark:border-rose-800 text-xs font-semibold text-rose-700 dark:text-rose-300">
+                                This terminal will automatically unlock when the patient toggles "Resume Demonstration" on their waiting screen.
+                              </div>
                             </div>
-                          )}
+                          ) : (
+                            /* Consent-gated read-only report viewer */
+                            <div
+                              onContextMenu={(e) => {
+                                e.preventDefault();
+                                showToast("Context menu disabled in the report viewer.", "info");
+                              }}
+                              style={{ userSelect: "none", WebkitUserSelect: "none" }}
+                              className="space-y-6"
+                            >
+                              {/* Security Watermark Banner */}
+                              <div className="p-4 rounded-lg border border-amber-300 bg-amber-50 dark:bg-amber-950/30 text-amber-950 dark:text-amber-200 text-xs flex flex-wrap items-center justify-between gap-3">
+                                <div className="flex items-center gap-2">
+                                  <IconShield className="w-4 h-4 text-amber-700 shrink-0" />
+                                  <span>
+                                    <strong>CONSENT-GATED REPORT VIEWER:</strong> No download or export controls are provided. A visible watermark and in-page context-menu restriction deter casual copying; they cannot prevent screenshots or all browser-level capture. Viewed by Dr. {currentUser?.full_name || "Attending Doctor"}.
+                                  </span>
+                                </div>
+                                <span className="font-mono text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-amber-200 dark:bg-amber-900 text-amber-900 dark:text-amber-100">
+                                  Read-only · consent gated
+                                </span>
+                              </div>
 
-                          <div className="space-y-4">
-                            {(session.documents || []).map((doc, idx) => (
-                              <div key={doc.id || idx} className="bg-white rounded-lg p-5 border border-slate-200">
-                                <div className="flex flex-wrap items-center justify-between gap-2 pb-2 border-b border-slate-100 mb-3">
-                                  <div className="flex items-center gap-2 font-bold text-slate-900 capitalize text-sm">
-                                    <IconFileText className="w-3.5 h-3.5" />
-                                    <span>{(doc.document_type || "Document").replace("_", " ")}</span>
+                              {/* Section 1: Patient Attached Diagnostic Scans (MRI, X-ray, Labs, CT) */}
+                              <div className="bg-white rounded-lg p-6 border border-slate-200 space-y-4">
+                                <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                                  <div>
+                                    <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                                      <IconClipboard className="w-4 h-4 text-[#0D5C4E]" />
+                                      <span>Attached Diagnostic Scans & Laboratory Reports (ABDM Vault)</span>
+                                    </h3>
+                                    <p className="text-xs text-slate-500 mt-0.5">
+                                      Patient-attached scans from their medical records vault for this consultation.
+                                    </p>
                                   </div>
-                                  <span className="text-xs text-slate-500 font-mono">
-                                    {doc.date ? `Date: ${doc.date}` : "Date: Not specified"}
+                                  <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                    {(session.attached_records || []).length} Attached Scans
                                   </span>
                                 </div>
 
-                                {doc.diagnoses?.length > 0 && (
-                                  <p className="text-sm mb-2 text-slate-800">
-                                    <strong className="text-slate-600">Extracted Diagnoses: </strong>
-                                    {doc.diagnoses.join(", ")}
-                                  </p>
-                                )}
-
-                                {doc.medications?.length > 0 && (
-                                  <div className="mb-3">
-                                    <strong className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1">
-                                      Prescribed Medications
-                                    </strong>
-                                    <div className="flex flex-wrap gap-1.5">
-                                      {doc.medications.map((m, i) => (
-                                        <span
-                                          key={i}
-                                          className="px-2.5 py-1 rounded-lg text-xs bg-slate-100 text-slate-800 border border-slate-200"
-                                        >
-                                          {m.name} {m.dosage ? `(${m.dosage})` : ""}
-                                        </span>
-                                      ))}
-                                    </div>
+                                {(session.attached_records || []).length === 0 ? (
+                                  <div className="p-6 text-center text-xs text-slate-400 italic border border-dashed border-slate-200 rounded-lg">
+                                    No prior scans were attached by patient for this intake.
                                   </div>
-                                )}
+                                ) : (
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    {(session.attached_records || []).map((scan, i) => (
+                                      <div
+                                        key={scan.id || i}
+                                        className="p-4 rounded-lg border border-slate-200 bg-slate-50/50 hover:border-emerald-500 transition-colors space-y-2.5 relative overflow-hidden"
+                                      >
+                                        <div className="flex items-start justify-between gap-2">
+                                          <div>
+                                            <span className="font-bold text-xs text-slate-900 block">
+                                              {scan.title}
+                                            </span>
+                                            <span className="text-[10px] text-slate-500">
+                                              {scan.facility} • {scan.date}
+                                            </span>
+                                          </div>
+                                          <span className="text-[10px] font-mono uppercase font-bold px-1.5 py-0.5 rounded bg-slate-200 text-slate-700">
+                                            {scan.type}
+                                          </span>
+                                        </div>
 
-                                {doc.investigations?.length > 0 && (
-                                  <div>
-                                    <strong className="text-xs font-bold uppercase tracking-wider text-slate-600 block mb-1">
-                                      Laboratory / Diagnostic Test Results
-                                    </strong>
-                                    <div className="overflow-x-auto border border-slate-200 rounded-md">
-                                      <table className="w-full text-xs text-left">
-                                        <thead className="bg-slate-50 border-b border-slate-200 text-slate-600 font-bold uppercase text-[10px]">
-                                          <tr>
-                                            <th className="py-2 px-3">Test Parameter</th>
-                                            <th className="py-2 px-3">Observed Value</th>
-                                            <th className="py-2 px-3">Reference Range</th>
-                                            <th className="py-2 px-3">Status</th>
-                                          </tr>
-                                        </thead>
-                                        <tbody className="divide-y divide-slate-100">
-                                          {doc.investigations.map((inv, i) => (
-                                            <tr
-                                              key={i}
-                                              className={inv.abnormal ? "bg-rose-50/80 font-bold text-rose-800" : "text-slate-800"}
-                                            >
-                                              <td className="py-2 px-3">{inv.test}</td>
-                                              <td className="py-2 px-3">{inv.value}</td>
-                                              <td className="py-2 px-3 text-slate-500">{inv.reference_range || "—"}</td>
-                                              <td className="py-2 px-3">
-                                                {inv.abnormal ? (
-                                                  <span className="px-2 py-0.5 rounded bg-rose-600 text-white font-bold text-[10px]">
-                                                    ABNORMAL
-                                                  </span>
-                                                ) : (
-                                                  <span className="text-emerald-700 font-medium text-[11px]">Normal</span>
-                                                )}
-                                              </td>
-                                            </tr>
-                                          ))}
-                                        </tbody>
-                                      </table>
-                                    </div>
+                                        <p className="text-xs text-slate-700 bg-white p-2 rounded border border-slate-200 leading-relaxed">
+                                          <strong>Findings:</strong> {scan.summary}
+                                        </p>
+
+                                        <div className="flex items-center justify-between pt-1 text-xs">
+                                          <span className="text-[11px] text-emerald-700 font-semibold">
+                                            ✓ Read-Only Verified
+                                          </span>
+                                          <button
+                                            type="button"
+                                            onClick={() => setSelectedScan(scan)}
+                                            className="px-3 py-1 rounded bg-[#0D5C4E] hover:bg-[#09453A] text-white font-bold text-xs transition flex items-center gap-1 shadow-xs"
+                                          >
+                                            <span>Inspect Scan (Viewer)</span>
+                                            <IconSearch className="h-3.5 w-3.5" />
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
                                   </div>
-                                )}
-
-                                {doc.extraction_notes && (
-                                  <p className="text-xs text-slate-500 italic mt-3 bg-slate-50 p-2 rounded-lg">
-                                    Note: {doc.extraction_notes}
-                                  </p>
                                 )}
                               </div>
-                            ))}
-                          </div>
+
+                              {/* Section 2: Shared Past Diagnosis History & Doctors' Remarks */}
+                              {session.share_past_history && (
+                                <div className="bg-white rounded-lg p-6 border border-slate-200 space-y-4">
+                                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                    <div>
+                                      <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
+                                        <IconStethoscope className="w-4 h-4 text-[#0D5C4E]" />
+                                        <span>Previous 9-Stage Intake Summaries & Past Doctors' Remarks</span>
+                                      </h3>
+                                      <p className="text-xs text-slate-500 mt-0.5">
+                                        Patient authorized sharing of prior clinical encounters and attending physician remarks.
+                                      </p>
+                                    </div>
+                                    <span className="text-xs font-mono font-bold px-2 py-0.5 rounded bg-emerald-50 text-emerald-800 border border-emerald-200">
+                                      Sharing Active
+                                    </span>
+                                  </div>
+
+                                  <div className="space-y-3">
+                                    {(session.past_diagnoses || []).map((pd) => (
+                                      <div
+                                        key={pd.id}
+                                        className="p-3.5 rounded-lg border border-slate-200 bg-slate-50 text-xs space-y-1.5"
+                                      >
+                                        <div className="flex items-center justify-between">
+                                          <span className="font-bold text-slate-900">
+                                            {pd.doctor_name} ({pd.specialization || pd.specialty})
+                                          </span>
+                                          <span className="text-[10px] text-slate-500 font-mono">
+                                            {pd.date}
+                                          </span>
+                                        </div>
+                                        <p className="font-semibold text-emerald-800">
+                                          Previous intake summary: {pd.intake_summary || pd.diagnosis}
+                                        </p>
+                                        <p className="text-slate-700 bg-white p-2 rounded border border-slate-200 italic">
+                                          "{pd.remarks || pd.doctor_remarks}"
+                                        </p>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Section 3: Physical Documents Uploaded During Kiosk Scan */}
+                              <div className="bg-white rounded-lg p-6 border border-slate-200 space-y-4">
+                                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                                  <h3 className="text-sm font-bold text-slate-900">
+                                    Physical Prescriptions & Camera Scans ({
+                                      (session.documents || []).filter((doc) => !doc.patient_record).length
+                                    })
+                                  </h3>
+                                  {abnormalCount > 0 && (
+                                    <span className="text-xs font-bold text-[#B91C1C] bg-[#FEF2F2] px-2.5 py-0.5 rounded-sm border border-[#B91C1C]/30 font-mono">
+                                      {abnormalCount} Abnormal Findings
+                                    </span>
+                                  )}
+                                </div>
+
+                                {(session.documents || []).filter((doc) => !doc.patient_record).length === 0 ? (
+                                  <div className="text-xs text-slate-400 italic">
+                                    No physical documents scanned via kiosk camera.
+                                  </div>
+                                ) : (
+                                  (session.documents || [])
+                                    .filter((doc) => !doc.patient_record)
+                                    .map((doc, idx) => (
+                                    <div key={doc.id || idx} className="p-4 rounded-lg border border-slate-200 bg-slate-50 space-y-2">
+                                      <div className="flex items-center justify-between font-bold text-xs text-slate-900">
+                                        <span>{(doc.document_type || "Document").replace("_", " ")}</span>
+                                        <span className="text-slate-500 font-mono text-[10px]">{doc.date || "Date: Not specified"}</span>
+                                      </div>
+                                      {doc.diagnoses?.length > 0 && (
+                                        <p className="text-xs text-slate-800">
+                                          <strong>Extracted Diagnoses:</strong> {doc.diagnoses.join(", ")}
+                                        </p>
+                                      )}
+                                      {doc.extraction_notes && (
+                                        <p className="text-xs text-slate-500 italic bg-white p-2 rounded border border-slate-200">
+                                          {doc.extraction_notes}
+                                        </p>
+                                      )}
+                                    </div>
+                                  ))
+                                )}
+                              </div>
+                            </div>
+                          )}
+
                         </div>
                       )}
 
@@ -2008,15 +2604,15 @@ Date: ________________________
                                     <rect x="55" y="75" width="15" height="8" fill="white" />
                                   </svg>
                                 </div>
-                                <span className="text-[10px] font-bold text-slate-500">Scan via ABHA App</span>
-                                <span className="text-[9px] text-emerald-700 font-medium">PHR Gateway Linked</span>
+                                <span className="text-[10px] font-bold text-slate-500">Sample QR preview</span>
+                                <span className="text-[9px] text-emerald-700 font-medium">No live PHR connection</span>
                               </div>
                             </div>
 
                             {/* Card Footer */}
                             <div className="px-5 py-2.5 bg-slate-100 border-t border-slate-200 text-center text-[10px] text-slate-600 flex flex-wrap items-center justify-between">
-                              <span>Ayushman Bharat Digital Mission (ABDM) • Interoperable EHR</span>
-                              <span className="font-mono text-emerald-800 font-bold">DPDP Act 2023 Protected</span>
+                              <span>FHIR R4 demonstration data • local prototype only</span>
+                              <span className="font-mono text-emerald-800 font-bold">Not certified</span>
                             </div>
                           </div>
 
@@ -2026,14 +2622,14 @@ Date: ________________________
                               <div>
                                 <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
                                   <IconEmblem className="w-4 h-4 text-[#0D5C4E]" />
-                                  <span>Linked Hospital Treatment Records & Clinical History</span>
+                                  <span>Sample Prior Encounters & Clinical History</span>
                                 </h3>
                                 <p className="text-xs text-slate-500 mt-0.5">
-                                  Historical encounters retrieved across ABDM-participating health facilities with patient consent.
+                                  Demonstration history only. No ABDM-participating facility is connected.
                                 </p>
                               </div>
                               <span className="text-xs font-bold text-[#0D5C4E] bg-[#FAFBF9] px-2 py-0.5 rounded-sm border border-[#121C18]/15 font-mono">
-                                3 Prior Hospital Encounters
+                                3 Demo Encounters
                               </span>
                             </div>
 
@@ -2131,10 +2727,10 @@ Date: ________________________
                                 <IconAlert className="w-4 h-4" />
                                 <div>
                                   <h4 className="text-xs font-bold text-slate-900">
-                                    ABDM Health Information Exchange (HIE-CM) Gateway
+                                    FHIR R4 Demonstration Bundle
                                   </h4>
                                   <p className="text-[11px] text-slate-500">
-                                    Active Consent ID: <span className="font-mono font-bold text-slate-700">HIE-CONSENT-91823-7492-ABDM</span> • DPDP Act 2023 Compliant
+                                    Consent state: <span className="font-mono font-bold text-slate-700">demo only</span> • No live HIE connection
                                   </p>
                                 </div>
                               </div>
@@ -2219,6 +2815,202 @@ Date: ________________________
           </button>
         </div>
       )}
+
+      {/* Embedded consent-gated read-only scan viewer */}
+      {selectedScan && (
+        <div
+          className="fixed inset-0 z-50 bg-black/85 flex items-center justify-center p-3 sm:p-6 backdrop-blur-xs animate-in fade-in duration-150"
+          onContextMenu={(e) => {
+            e.preventDefault();
+            showToast("Right-click context menu disabled (Anti-Exfiltration Security)", "error");
+          }}
+          style={{ userSelect: "none", WebkitUserSelect: "none" }}
+        >
+          <div className="bg-slate-950 text-slate-100 rounded-xl border border-slate-800 max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden shadow-2xl">
+            {/* Modal Header */}
+            <div className="px-5 py-3.5 border-b border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 shrink-0">
+              <div className="flex items-center gap-3">
+                <span className="px-2.5 py-0.5 rounded font-mono font-bold text-xs uppercase bg-[#0D5C4E] text-white">
+                  {selectedScan.type}
+                </span>
+                <div>
+                  <h3 className="font-bold text-sm text-white flex items-center gap-2">
+                    <span>{selectedScan.title}</span>
+                    <span className="text-[10px] text-emerald-400 font-mono">● READ-ONLY PROTECTED</span>
+                  </h3>
+                  <p className="text-[11px] text-slate-400">
+                    Patient: {session?.patient_name || "Patient"} • {selectedScan.facility} • {selectedScan.date}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3">
+                <span className="hidden sm:inline text-[10px] font-mono font-bold uppercase text-amber-400 border border-amber-500/40 px-2 py-0.5 rounded bg-amber-950/40">
+                  No report download control
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setSelectedScan(null)}
+                  className="px-3 py-1 rounded-md bg-slate-800 hover:bg-slate-700 text-xs font-bold text-white transition"
+                >
+                  Close Viewer ✕
+                </button>
+              </div>
+            </div>
+
+            {/* Medical Imaging Radiologic Viewport with Forensic Watermark Overlay */}
+            <div className="flex-1 overflow-y-auto p-6 flex flex-col items-center justify-center relative bg-black">
+
+              {/* DIAGONAL FORENSIC WATERMARK OVERLAY (Requirement 5d) */}
+              <div
+                className="absolute inset-0 pointer-events-none z-20 flex flex-col items-center justify-around opacity-25 overflow-hidden select-none"
+                aria-hidden="true"
+              >
+                {[...Array(6)].map((_, idx) => (
+                  <div
+                    key={idx}
+                    className="rotate-[-25deg] text-[13px] sm:text-[15px] font-black font-mono tracking-widest text-slate-300 uppercase whitespace-nowrap"
+                  >
+                    DEMONSTRATION RECORD • IN-APP VIEW ONLY • DR. {currentUser?.full_name?.toUpperCase() || "OPD PHYSICIAN"} • SCREENSHOTS CANNOT BE PREVENTED
+                  </div>
+                ))}
+              </div>
+
+              {/* Viewport Content */}
+              <div className="relative z-10 w-full max-w-2xl bg-slate-900/90 border border-slate-800 rounded-lg p-6 space-y-4 shadow-inner">
+                {selectedScan.file_id ? (
+                  selectedScanFileLoading ? (
+                    <p className="py-24 text-center text-sm text-slate-300">Loading shared report…</p>
+                  ) : selectedScanFileError ? (
+                    <p role="alert" className="py-24 text-center text-sm text-rose-300">
+                      {selectedScanFileError}
+                    </p>
+                  ) : selectedScanFileUrl && selectedScan.media_type?.startsWith("image/") ? (
+                    <img
+                      src={selectedScanFileUrl}
+                      alt={`${selectedScan.title} uploaded by the patient`}
+                      draggable="false"
+                      className="max-h-[65vh] max-w-full object-contain mx-auto"
+                    />
+                  ) : selectedScanFileUrl ? (
+                    <iframe
+                      title={`${selectedScan.title} read-only report`}
+                      src={`${selectedScanFileUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                      className="w-full h-[65vh] bg-white"
+                      style={{ pointerEvents: "none" }}
+                    />
+                  ) : null
+                ) : selectedScan.type?.toLowerCase().includes("mri") ? (
+                  <div className="space-y-4 text-center">
+                    <div className="h-64 sm:h-80 w-full rounded-md bg-gradient-to-b from-slate-950 via-slate-900 to-black border border-slate-700/80 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+                      {/* Simulated Spinal Column Radiography Graphic */}
+                      <svg viewBox="0 0 200 240" className="w-44 h-56 stroke-emerald-400/80 fill-none stroke-[1.5]">
+                        <ellipse cx="100" cy="30" rx="36" ry="14" className="stroke-slate-400" />
+                        <ellipse cx="100" cy="65" rx="38" ry="15" className="stroke-slate-400" />
+                        <ellipse cx="100" cy="100" rx="40" ry="16" className="stroke-slate-400" />
+                        <ellipse cx="100" cy="138" rx="42" ry="17" className="stroke-amber-400 stroke-2" />
+                        <ellipse cx="100" cy="178" rx="44" ry="18" className="stroke-rose-500 stroke-2" />
+                        <path d="M 85 20 Q 95 120 85 220" className="stroke-emerald-400/60 stroke-1 stroke-dasharray-[3,3]" />
+                        <path d="M 115 20 Q 105 120 115 220" className="stroke-emerald-400/60 stroke-1 stroke-dasharray-[3,3]" />
+                        <text x="148" y="142" fill="#FBBF24" fontSize="8" fontFamily="monospace">L4-L5</text>
+                        <text x="148" y="182" fill="#F87171" fontSize="8" fontFamily="monospace">L5-S1</text>
+                      </svg>
+                      <div className="absolute top-3 left-3 text-[10px] font-mono text-emerald-400 text-left">
+                        <div>SAG T2 FRFSE</div>
+                        <div>TE: 104ms TR: 3800ms</div>
+                        <div>FOV: 26cm • Slice: 4.0mm</div>
+                      </div>
+                      <div className="absolute bottom-3 right-3 text-[10px] font-mono text-slate-400 text-right">
+                        <div>APEX MRI 3.0T</div>
+                        <div>ID: {selectedScan.id}</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : selectedScan.type?.toLowerCase().includes("x-ray") ? (
+                  <div className="space-y-4 text-center">
+                    <div className="h-64 sm:h-80 w-full rounded-md bg-gradient-to-b from-slate-950 via-slate-900 to-black border border-slate-700/80 flex flex-col items-center justify-center p-4 relative overflow-hidden">
+                      {/* Simulated Knee Joint Space Radiography Graphic */}
+                      <svg viewBox="0 0 200 240" className="w-48 h-60 stroke-slate-300 fill-none stroke-[1.8]">
+                        {/* Femur Condyles */}
+                        <path d="M 60 20 L 60 90 C 60 115 85 120 95 105 C 105 120 130 115 130 90 L 130 20" />
+                        {/* Joint Space Gap */}
+                        <line x1="65" y1="126" x2="125" y2="126" className="stroke-amber-400 stroke-2 stroke-dashed" />
+                        {/* Tibia Plateau */}
+                        <path d="M 50 145 C 75 135 95 142 100 138 C 105 142 125 135 150 145 L 140 220 L 60 220 Z" />
+                        {/* Fibula */}
+                        <path d="M 152 160 L 160 220" className="stroke-slate-500 stroke-1" />
+                        <text x="25" y="128" fill="#FBBF24" fontSize="8" fontFamily="monospace">Medial Gap</text>
+                        <text x="25" y="138" fill="#F87171" fontSize="7" fontFamily="monospace">Narrowing (Gr. II)</text>
+                      </svg>
+                      <div className="absolute top-3 left-3 text-[10px] font-mono text-slate-300 text-left">
+                        <div>DIGITAL RADIOGRAPH PA VIEW</div>
+                        <div>80 kVp • 25 mAs</div>
+                      </div>
+                      <div className="absolute bottom-3 right-3 text-[10px] font-mono text-slate-400 text-right">
+                        <div>CIVIL DIAGNOSTICS DR</div>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4 text-center">
+                    <div className="h-64 sm:h-80 w-full rounded-md bg-slate-950 border border-slate-800 flex flex-col items-center justify-center p-6 text-left">
+                      <div className="w-full space-y-3 font-mono text-xs text-slate-200">
+                        <div className="flex justify-between border-b border-slate-800 pb-2 text-emerald-400 font-bold">
+                          <span>PARAMETRIC DIAGNOSTIC TELEMETRY</span>
+                          <span>STATUS: RECORD VALID</span>
+                        </div>
+                        <div className="grid grid-cols-2 gap-3 pt-2">
+                          <div>
+                            <span className="text-slate-500 block text-[10px]">RECORD CLASSIFICATION</span>
+                            <span className="font-bold text-white">{selectedScan.type}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block text-[10px]">CAPTURED TIMESTAMP</span>
+                            <span className="text-white">{selectedScan.date}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block text-[10px]">FACILITY SOURCE</span>
+                            <span className="text-white">{selectedScan.facility}</span>
+                          </div>
+                          <div>
+                            <span className="text-slate-500 block text-[10px]">SECURITY HASH</span>
+                            <span className="text-emerald-400 font-mono text-[10px]">Read-only access</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Radiologist Clinical Interpretation */}
+                <div className="p-3.5 rounded bg-slate-950 border border-slate-800 text-xs space-y-1">
+                  <div className="font-bold text-emerald-400 uppercase tracking-wider text-[10px]">
+                    Radiologist / Pathologist Clinical Impression
+                  </div>
+                  <p className="text-slate-200 leading-relaxed font-sans">
+                    {selectedScan.summary}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Modal Footer (No Download Buttons) */}
+            <div className="px-5 py-3 border-t border-slate-800 bg-slate-900/90 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-400 shrink-0">
+              <span className="flex items-center gap-1.5 font-mono text-[11px]">
+                <IconShield className="w-3.5 h-3.5 text-emerald-400" />
+                <span>Consent-aware prototype controls · screenshots cannot be prevented</span>
+              </span>
+              <button
+                type="button"
+                onClick={() => setSelectedScan(null)}
+                className="px-4 py-1.5 rounded-md bg-[#0D5C4E] hover:bg-[#09453A] text-white font-bold text-xs transition"
+              >
+                Close Viewer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
-  );
+    );
 }

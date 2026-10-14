@@ -46,7 +46,7 @@ function IconArrowRight({ className = "w-4 h-4" }) {
   );
 }
 
-export default function Converse({ lang, sessionId, department = "ayush", onComplete, onBack }) {
+export default function Converse({ lang, sessionId, department = "general", onComplete, onBack }) {
   const [log, setLog] = useState([]);
   const [currentQuestion, setCurrentQuestion] = useState(null);
   const [currentOptions, setCurrentOptions] = useState([]);
@@ -63,7 +63,9 @@ export default function Converse({ lang, sessionId, department = "ayush", onComp
   const applyResponse = (response) => {
     setCurrentQuestion(response.next_question);
     setCurrentOptions(response.quick_options || []);
-    setTurnCount((n) => n + 1);
+    if (response.next_question) {
+      setTurnCount((n) => Math.min(n + 1, 9));
+    }
     if (response.red_flag) {
       setRedFlag(true);
       setRedFlagReason(response.red_flag_reason);
@@ -139,11 +141,6 @@ export default function Converse({ lang, sessionId, department = "ayush", onComp
   };
 
   const getDoctorRoleLabel = () => {
-    if (department === "ayush") {
-      return lang === "hi"
-        ? "आयुष केस-टेकिंग वैद्य (Ayush Intake)"
-        : "Ayush Clinical Intake Vaidya";
-    }
     if (department === "integrated") {
       return lang === "hi"
         ? "एकीकृत चिकित्सा परामर्शक (Integrative Medicine)"
@@ -155,7 +152,7 @@ export default function Converse({ lang, sessionId, department = "ayush", onComp
   };
 
   return (
-    <div className="flex-1 flex flex-col bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] overflow-hidden transition-colors">
+    <div className="kiosk-screen flex-1 flex flex-col bg-[#FAFBF9] dark:bg-[#0E1513] text-[#121C18] dark:text-[#F2F6F4] overflow-hidden transition-colors">
       {redFlag && <RedFlagAlert lang={lang} />}
 
       {/* Top Clinical Header */}
@@ -181,7 +178,7 @@ export default function Converse({ lang, sessionId, department = "ayush", onComp
                 {getDoctorRoleLabel()}
               </div>
               <div className="text-[11px] text-[#4A5852] dark:text-[#8D9E97]">
-                {t(lang, "appName")} · SOCRATES & Pariksha Protocol
+                {t(lang, "appName")} · Nine-stage SOCRATES clinical intake
               </div>
             </div>
           </div>
@@ -332,6 +329,7 @@ export default function Converse({ lang, sessionId, department = "ayush", onComp
             <input
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
+              aria-label={lang === "hi" ? "अपना उत्तर लिखें" : "Type your answer"}
               placeholder={t(lang, "typeAnswer")}
               disabled={loading}
               className="flex-1 h-11 px-3.5 rounded border border-[#D3DDD8] dark:border-[#24352F] bg-white dark:bg-[#0E1513] text-sm text-[#121C18] dark:text-[#F2F6F4] focus:outline-none focus:border-[#0D5C4E] focus:ring-1 focus:ring-[#0D5C4E]"

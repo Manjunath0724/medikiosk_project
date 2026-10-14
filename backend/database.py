@@ -82,8 +82,8 @@ def init_database() -> bool:
                 `full_name` VARCHAR(255) NOT NULL,
                 `password_hash` VARCHAR(255) NOT NULL,
                 `salt` VARCHAR(64) NOT NULL,
-                `role` ENUM('patient', 'doctor', 'staff', 'admin') NOT NULL DEFAULT 'patient',
-                `department` VARCHAR(100) DEFAULT 'ayush',
+                `role` ENUM('patient', 'doctor') NOT NULL DEFAULT 'patient',
+                `department` VARCHAR(100) DEFAULT 'general',
                 `specialization` VARCHAR(255) NULL,
                 `abha_id` VARCHAR(100) NULL,
                 `age` INT NULL,
@@ -100,7 +100,7 @@ def init_database() -> bool:
                 `session_id` VARCHAR(64) NOT NULL PRIMARY KEY,
                 `token_number` VARCHAR(50) NOT NULL,
                 `patient_name` VARCHAR(255) NOT NULL DEFAULT 'Guest Patient',
-                `department` VARCHAR(50) NOT NULL DEFAULT 'ayush',
+                `department` VARCHAR(50) NOT NULL DEFAULT 'general',
                 `language` VARCHAR(10) NOT NULL DEFAULT 'en',
                 `abha_id` VARCHAR(100) NULL,
                 `consent` BOOLEAN NOT NULL DEFAULT TRUE,
@@ -129,6 +129,12 @@ def init_database() -> bool:
                 `current_token` INT NOT NULL DEFAULT 0
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
             """)
+            cur.execute(
+                "UPDATE `users` SET `role` = 'patient' WHERE `role` NOT IN ('patient', 'doctor')"
+            )
+            cur.execute(
+                "ALTER TABLE `users` MODIFY `role` ENUM('patient', 'doctor') NOT NULL DEFAULT 'patient'"
+            )
             cur.execute("""
             INSERT INTO `token_sequence` (`id`, `current_token`)
             VALUES (1, 4)
